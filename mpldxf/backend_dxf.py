@@ -181,12 +181,10 @@ class RendererDxf(RendererBase):
 
         else:
             if isinstance(vertices[0][0], float or np.float64):
-                if vertices[0][0] != 0:
-                    entity = self.modelspace.add_lwpolyline(
-                        points=vertices, close=False, dxfattribs=dxfattribs
-                    )  # set close to false because it broke some arrows
-                else:
-                    entity = None
+                entity = self.modelspace.add_lwpolyline(
+                    points=vertices, close=False, dxfattribs=dxfattribs
+                )  # set close to false because it broke some arrows
+
             else:
                 entity = [
                     self.modelspace.add_lwpolyline(
@@ -203,8 +201,8 @@ class RendererDxf(RendererBase):
         """Draw a matplotlib patch object"""
 
         poly = self._draw_mpl_lwpoly(gc, path, transform, obj="patch")
-        if math.isclose(path.vertices[0][1], 421.2598):
-            pass
+        if not poly:
+            return
         # check to see if the patch is filled
         if rgbFace is not None:
             if type(poly) == list:
