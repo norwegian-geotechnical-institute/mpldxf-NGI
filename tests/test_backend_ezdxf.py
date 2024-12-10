@@ -27,6 +27,7 @@ import matplotlib
 from matplotlib import pyplot as plt
 import numpy as np
 from numpy.random import random
+import pytest
 
 from mpldxf import backend_dxf
 
@@ -34,31 +35,86 @@ from mpldxf import backend_dxf
 matplotlib.backend_bases.register_backend("dxf", backend_dxf.FigureCanvas)
 
 
-class DxfBackendTestCase(unittest.TestCase):
+class TestDxfBackendCase(unittest.TestCase):
     """Tests for the dxf backend."""
 
     def test_plot_line_with_no_axis(self):
         """Test a simple line-plot command."""
         plt.gca().patch.set_visible(False)
-        plt.plot(range(5), [1, 2, 3, 2, 4])
+        plt.plot(range(7), [1, 2, 3, 2, 4, 6, 7])
         plt.axis("off")
+        plt.savefig("tests/files/test_plot_line_with_no_axis.png")
 
-        outfile = "tests/files/test_plot_line_with_no_axis.dxf"
-        plt.close()
+        try:
+            outfile = "tests/files/test_plot_line_with_no_axis.dxf"
+            plt.savefig(outfile, transparent=True)
+        finally:
+            plt.close()
 
         # Load the DXF file and inspect its content
         doc = ezdxf.readfile(outfile)
         modelspace = doc.modelspace()
         entities = list(modelspace)
-        assert len(entities) == 2  # 1 line and the bounding box of the plot
+        assert len(entities) == 1  # 1 line
 
     def test_plot_line(self):
         """Test a simple line-plot command."""
         plt.gca().patch.set_visible(False)
         plt.plot(range(3), [1, 2, 3])
-        outfile = "tests/files/test_plot_line.dxf"
-        plt.savefig(outfile, transparent=True)
-        plt.close()
+        plt.savefig("tests/files/test_plot_line.png")
+
+        try:
+            outfile = "tests/files/test_plot_line.dxf"
+            plt.savefig(outfile, transparent=True)
+        finally:
+            plt.close()
+
+        # Load the DXF file and inspect its content
+        doc = ezdxf.readfile(outfile)
+        modelspace = doc.modelspace()
+        entities = list(modelspace)
+        entity_types = set([entity.dxftype() for entity in entities])
+        assert entity_types == {"LWPOLYLINE", "TEXT"}
+
+    def test_plot_with_data_outside_axes(self):
+        """Test a simple line-plot command with data outside the axes."""
+        plt.plot(range(7), [1, 2, 3, 1e5, 5, 6, 7])
+        plt.ylim(0, 7)
+        plt.xlim(1, 6)
+        plt.savefig("tests/files/test_plot_with_data_outside_axes.png")
+
+        try:
+            plt.savefig("tests/files/test_plot_with_data_outside_axes.png")
+            outfile = "tests/files/test_plot_with_data_outside_axes.dxf"
+            plt.savefig(outfile, transparent=True)
+        finally:
+            plt.close()
+
+        # Load the DXF file and inspect its content
+        doc = ezdxf.readfile(outfile)
+        modelspace = doc.modelspace()
+        entities = list(modelspace)
+        entity_types = set([entity.dxftype() for entity in entities])
+        assert entity_types == {"LWPOLYLINE", "TEXT"}
+
+    def test_plot_with_twin_axis_and_data_outside_axes(self):
+        """Test a simple line-plot command with data outside the axes."""
+        fig, ax1 = plt.subplots()
+        ax2 = ax1.twinx()
+        ax1.plot(range(7), [1, 2, 3, 1e5, 5, 6, 7])
+        ax2.plot(range(7), [1, 2, 3, 1e5, 5, 6, 7])
+        ax1.set_ylim(1, 6)
+        ax2.set_ylim(1, 6)
+        plt.savefig("tests/files/test_plot_with_twin_axis_and_data_outside_axes.png")
+
+        try:
+            plt.savefig(
+                "tests/files/test_plot_with_twin_axis_and_data_outside_axes.png"
+            )
+            outfile = "tests/files/test_plot_with_twin_axis_and_data_outside_axes.dxf"
+            plt.savefig(outfile, transparent=True)
+        finally:
+            plt.close()
 
         # Load the DXF file and inspect its content
         doc = ezdxf.readfile(outfile)
@@ -76,20 +132,29 @@ class DxfBackendTestCase(unittest.TestCase):
             [3, 5, 6, 7, 9, 10, 12, 13],
         ]
         plt.boxplot(data)
-        outfile = "tests/files/test_boxplot.dxf"
-        plt.savefig(outfile)
-        plt.close()
+        plt.savefig("tests/files/test_boxplot.png")
+
+        try:
+            outfile = "tests/files/test_boxplot.dxf"
+            plt.savefig(outfile)
+        finally:
+            plt.close()
 
     def test_contour(self):
         """Test some contours."""
+        print("TEST CONTOUR")
         x = np.linspace(-5.0, 5.0, 30)
         y = np.linspace(-5.0, 5.0, 30)
         X, Y = np.meshgrid(x, y)
         Z = np.sin(np.sqrt(X**2 + Y**2))
         plt.contour(X, Y, Z)
-        outfile = "tests/files/test_contour.dxf"
-        plt.savefig(outfile)
-        plt.close()
+        plt.savefig("tests/files/test_contour.png")
+
+        try:
+            outfile = "tests/files/test_contour.dxf"
+            plt.savefig(outfile)
+        finally:
+            plt.close()
 
     def test_contourf(self):
         """Test some filled contours."""
@@ -98,6 +163,11 @@ class DxfBackendTestCase(unittest.TestCase):
         X, Y = np.meshgrid(x, y)
         Z = np.sin(np.sqrt(X**2 + Y**2))
         plt.contourf(X, Y, Z)
-        outfile = "tests/files/test_contourf.dxf"
-        plt.savefig(outfile)
-        plt.close()
+        plt.savefig("tests/files/test_contourf.png")
+
+        try:
+            outfile = "tests/files/test_contourf.dxf"
+            plt.savefig(outfile)
+
+        finally:
+            plt.close()

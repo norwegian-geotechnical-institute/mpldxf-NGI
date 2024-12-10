@@ -140,8 +140,19 @@ class RendererDxf(RendererBase):
                 line = LineString(vertices)
                 try:
                     intersection = line.intersection(cliprect)
-                except:
-                    intersection = Polygon()
+                except Exception:
+                    # Fix plotted values with large gaps/jumps crashing the intersection function
+                    gap_threshold = 50
+                    smoothed_vertices = [vertices[0]]  # Start with the first point
+                    for i in range(1, len(vertices)):
+                        if (
+                            abs(vertices[i][0] - vertices[i - 1][0]) <= gap_threshold
+                            and abs(vertices[i][1] - vertices[i - 1][1])
+                            <= gap_threshold
+                        ):
+                            smoothed_vertices.append(vertices[i])
+                    line = LineString(smoothed_vertices)
+                    intersection = line.intersection(cliprect)
 
                 # Check if intersection is a multi-part geometry
                 if intersection.is_empty:
@@ -323,17 +334,15 @@ class RendererDxf(RendererBase):
         urls,
         offset_position,
     ):
-        if self._groupd[-1] == "PolyCollection":
-            # Behandle PolyCollection som en samling av 'patch'-objekter
-            for path in paths:
-                # Kombiner master_transform med path_transform for hver path
+        for i, path in enumerate(paths):
+            if all_transforms:
+                combined_transform = master_transform + all_transforms[i]
+            else:
                 combined_transform = master_transform
-                # Her kan du velge å bruke eller tilpasse rgbFace basert på facecolors, hvis det er relevant
-                if facecolors.size:
-                    rgbFace = facecolors[0] if facecolors is not None else None
-                else:
-                    rgbFace = None
-                self._draw_mpl_patch(gc, path, combined_transform, rgbFace)
+            facecolor = facecolors[i] if i < len(facecolors) else None
+            edgecolor = edgecolors[i] if i < len(edgecolors) else None
+            # Draw each path as a filled patch
+            self._draw_mpl_patch(gc, path, combined_transform, rgbFace=facecolor)
 
     def draw_path(self, gc, path, transform, rgbFace=None):
         # print('\nEntered ###DRAW_PATH###')
@@ -352,7 +361,6 @@ class RendererDxf(RendererBase):
         elif self._groupd[-1] == "line2d":
             line = self._draw_mpl_line2d(gc, path, transform)
 
-    # Note if this is used then tick marks and lines with markers go through this function
     def draw_markers(self, gc, marker_path, marker_trans, path, trans, rgbFace=None):
         # print('\nEntered ###DRAW_MARKERS###')
         # print('\t', self._groupd)
@@ -478,6 +486,21 @@ class RendererDxf(RendererBase):
 
     def points_to_pixels(self, points):
         return points / 72.0 * self.dpi
+
+    def draw_quad_mesh(
+        self,
+        gc,
+        master_transform,
+        meshWidth,
+        meshHeight,
+        coordinates,
+        offsets,
+        offsetTrans,
+        facecolors,
+        antialiased,
+        edgecolors,
+    ):
+        pass
 
 
 class FigureCanvasDxf(FigureCanvasBase):
