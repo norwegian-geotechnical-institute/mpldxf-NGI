@@ -95,6 +95,11 @@ class RendererDxf(RendererBase):
         self.use_ngi_layers = use_ngi_layers
         self._init_drawing()
         self._groupd = []
+        self._method_context = False
+        self._axes_patch_count = {}  # Track patches per axes
+        self._current_axes_id = None
+        self._axes_counter = 0  # Global axes counter
+        self._pending_patch_analysis = None  # For position-based analysis
 
     def _init_drawing(self):
         """Create a drawing, set some global information and add the layers we need."""
@@ -141,101 +146,168 @@ class RendererDxf(RendererBase):
         context_str = " ".join(self._groupd).lower()
         current_element = self._groupd[-1].lower()
 
-        # Method icons and symbols (from add_symbol function) - HIGH PRIORITY
-        # Look for offsetbox/drawingarea/anchored anywhere in the context
-        if any(
-            keyword in context_str
-            for keyword in ["offsetbox", "drawingarea", "anchored"]
-        ):
-            return "FM-Method"
+        print(f"DETERMINE LAYER: Element='{current_element}', Context='{context_str}'")
 
-        # Collections that are NOT in axes context = method icons
-        if current_element == "collection":
-            # If it's not an axes-level collection, it's likely a method icon
-            if "axes" not in context_str:
-                return "FM-Method"
+        # Patches - defer to size analysis
+        if current_element == "patch":
+            return "PENDING"  # Will be resolved in _draw_mpl_patch
 
-        # Patches - method icons vs frame elements
-        elif current_element == "patch":
-            # Method icons (from add_symbol)
-            if any(
-                keyword in context_str
-                for keyword in ["offsetbox", "drawingarea", "anchored"]
-            ):
-                return "FM-Method"
-            # Axes background patches
-            elif "axes" in context_str and len(self._groupd) <= 2:
-                return "FM-Frame"
-            # Other patches could be method icons if not clearly frame-related
-            elif not any(
-                keyword in context_str for keyword in ["axes", "spine", "grid", "tick"]
-            ):
-                return "FM-Method"
-            else:
-                return "FM-Frame"
-
-        # Line2D elements - need to distinguish data vs frame
+        # Line2D elements - distinguish data vs frame
         elif current_element == "line2d":
-            # Frame elements: spines, grids, ticks
-            if any(keyword in context_str for keyword in ["spine", "grid", "tick"]):
+            # Frame elements: ticks and axis lines
+            if any(keyword in context_str for keyword in ["tick", "matplotlib.axis"]):
+                print(f"  -> FM-Frame (tick/axis line)")
                 return "FM-Frame"
-            # Axes-level lines that are NOT spines/grids = DATA LINES
+            # Data lines in axes context
             elif "axes" in context_str:
-                # Check if it's really frame-related
-                if any(keyword in context_str for keyword in ["xaxis", "yaxis"]):
-                    return "FM-Frame"
-                else:
-                    return "FM-Graph"  # This should be your data lines
+                print(f"  -> FM-Graph (data line)")
+                return "FM-Graph"
             else:
+                print(f"  -> FM-Graph (other line)")
                 return "FM-Graph"
 
+        # Collections - these are often method symbols
+        elif current_element == "collection":
+            print(f"  -> FM-Method (collection)")
+            return "FM-Method"
+
+        # Text elements
+        elif current_element == "text":
+            return "FM-Text"  # Will be overridden in text layer logic
+
         # Specific frame elements
-        elif any(
-            keyword in context_str for keyword in ["axes", "spine", "grid", "tick"]
-        ):
+        elif any(keyword in context_str for keyword in ["tick", "matplotlib.axis"]):
+            print(f"  -> FM-Frame (frame element)")
             return "FM-Frame"
 
+        print(f"  -> 0 (default)")
         return "0"
 
-    def _determine_text_layer(self, text_content):
+    def _analyze_patch_size(self, vertices):
+        """Simple shape-based classification of patches"""
+        if vertices is None or len(vertices) == 0:
+            return "FM-Frame"
+
+        # Convert to numpy array
+        verts = np.array(vertices)
+
+        # Calculate bounding box
+        min_x, min_y = np.min(verts, axis=0)
+        max_x, max_y = np.max(verts, axis=0)
+
+        # Calculate dimensions
+        width = max_x - min_x
+        height = max_y - min_y
+
+        print(f"    -> Patch size: {width:.1f}x{height:.1f}")
+
+        # Avoid division by zero
+        if height == 0 or width == 0:
+            print(f"    -> FM-Frame (zero dimension)")
+            return "FM-Frame"
+
+        # Calculate aspect ratio
+        aspect_ratio = max(width, height) / min(width, height)
+
+        print(f"    -> Aspect ratio: {aspect_ratio:.2f}")
+
+        # Shape-based classification:
+        # - Very thin/long elements (spines, gridlines) -> Frame
+        # - Square-ish elements (method icons) -> Method
+        # - Large backgrounds -> Frame
+
+        if aspect_ratio > 10:  # Very long/thin = spines, gridlines, borders
+            print(f"    -> FM-Frame (thin line/border)")
+            return "FM-Frame"
+        elif (
+            aspect_ratio < 3 and width < 100 and height < 100
+        ):  # Roughly square and small = method icon
+            print(f"    -> FM-Method (square small patch - likely icon)")
+            return "FM-Method"
+        else:  # Everything else = frame elements
+            print(f"    -> FM-Frame (frame element)")
+            return "FM-Frame"
+
+    def open_group(self, s, gid=None):
+        """Open a grouping element with label *s*."""
+        self._groupd.append(s)
+        print(f"OPEN GROUP: {s}, Full context: {self._groupd}")
+
+        # Track axes changes with a unique counter
+        if s == "axes":
+            self._axes_counter += 1
+            self._current_axes_id = self._axes_counter
+            if self._current_axes_id not in self._axes_patch_count:
+                self._axes_patch_count[self._current_axes_id] = 0
+            print(f"  -> New axes #{self._current_axes_id}")
+
+        # Check if we're entering a method context
+        if s.lower() in ["offsetbox", "drawingarea"]:
+            self._method_context = True
+            print(f"  -> METHOD CONTEXT ACTIVATED")
+
+    def close_group(self, s):
+        """Close a grouping element with label *s*."""
+        print(f"CLOSE GROUP: {s}, Context before: {self._groupd}")
+        if self._groupd and self._groupd[-1] == s:
+            self._groupd.pop()
+
+        # Check if we're exiting a method context
+        if s.lower() in ["offsetbox", "drawingarea"]:  # Remove "anchored"
+            self._method_context = False
+            print(f"  -> METHOD CONTEXT DEACTIVATED")
+
+    def _determine_text_layer(self, text_content, fontsize):
         """Determine text layer based on matplotlib context and content"""
         if not self.use_ngi_layers:
             return "0"
 
         context_str = " ".join(self._groupd).lower() if self._groupd else ""
 
-        # Method text (from add_symbol function) - HIGH PRIORITY
-        if any(
-            keyword in context_str
-            for keyword in ["offsetbox", "drawingarea", "anchored"]
-        ):
-            return "FM-Method"
+        print(f"DETERMINE TEXT LAYER: Text='{text_content}', Context='{context_str}'")
 
         # Y-axis elements -> Depth
         if any(keyword in context_str for keyword in ["yaxis", "ytick"]):
+            print(f"  -> FM-Depth (y-axis)")
             return "FM-Depth"
 
         # X-axis elements -> Value
         if any(keyword in context_str for keyword in ["xaxis", "xtick"]):
+            print(f"  -> FM-Value (x-axis)")
             return "FM-Value"
 
-        # Title elements -> Location (often contains location info)
+        # Title elements and large text -> Location
         if "title" in context_str:
-            return "FM-Location"
+            if fontsize > 8:
+                print(f"  -> FM-Location (title)")
+                return "FM-Location"
+            else:
+                print(f"  -> FM-Method (title small)")
+                return "FM-Method"
+
+        # Text in general axes context - check position and content
+        if "axes" in context_str:
+            # Check if it's a large title-like text at top of plot
+            # This is often location text even if it's just a number
+            if len(self._groupd) == 3:  # ['figure', 'axes', 'text']
+                if fontsize > 8:
+                    print(f"  -> FM-Location (axes title text)")
+                    return "FM-Location"
+                else:
+                    print(f"  -> FM-Method (axes title text small)")
+                    return "FM-Method"
 
         # Legend elements -> Method
         if "legend" in context_str:
+            print(f"  -> FM-Method (legend)")
             return "FM-Method"
 
         # Axis labels -> Text
         if any(keyword in context_str for keyword in ["xlabel", "ylabel"]):
+            print(f"  -> FM-Text (axis labels)")
             return "FM-Text"
 
-        # Annotations -> Location
-        if "annotation" in context_str:
-            return "FM-Location"
-
-        # Content-based classification as fallback
+        # Content-based classification
         text_lower = text_content.lower()
 
         # Location text patterns
@@ -243,25 +315,33 @@ class RendererDxf(RendererBase):
             keyword in text_lower
             for keyword in ["boring", "bh-", "hole", "site", "location"]
         ):
-            return "FM-Location"
+            if fontsize > 8:
+                print(f"  -> FM-Location (location pattern)")
+                return "FM-Location"
+            else:
+                print(f"  -> FM-Method (location pattern small)")
+                return "FM-Method"
 
         # Method text patterns
         if any(
             keyword in text_lower
             for keyword in ["cpt", "spt", "pmt", "dmt", "method", "test"]
         ):
+            print(f"  -> FM-Method (method pattern)")
             return "FM-Method"
 
-        # Numeric patterns might be values or depths
+        # Numeric patterns
         import re
 
         if re.match(r"^\s*[-+]?\d*\.?\d+\s*$", text_content):
-            # Pure numbers - could be axis values, let context decide
-            if "y" in context_str:
+            if "y" in context_str or "ytick" in context_str:
+                print(f"  -> FM-Depth (numeric y)")
                 return "FM-Depth"
-            elif "x" in context_str:
+            elif "x" in context_str or "xtick" in context_str:
+                print(f"  -> FM-Value (numeric x)")
                 return "FM-Value"
 
+        print(f"  -> FM-Text (default)")
         return "FM-Text"
 
     def _get_polyline_attribs(self, gc):
@@ -321,8 +401,10 @@ class RendererDxf(RendererBase):
 
         return vertices
 
-    def _draw_mpl_lwpoly(self, gc, path, transform, obj):
-        dxfattribs = self._get_polyline_attribs(gc)
+    def _draw_mpl_lwpoly(self, gc, path, transform, obj, dxfattribs=None):
+        if dxfattribs is None:
+            dxfattribs = self._get_polyline_attribs(gc)
+
         vertices = path.transformed(transform).vertices
 
         if len(vertices) > 0:
@@ -355,9 +437,30 @@ class RendererDxf(RendererBase):
 
     def _draw_mpl_patch(self, gc, path, transform, rgbFace=None):
         """Draw a matplotlib patch object"""
-        dxfattribs = self._get_polyline_attribs(gc)
 
-        poly = self._draw_mpl_lwpoly(gc, path, transform, obj="patch")
+        # Get vertices for size analysis
+        vertices = path.transformed(transform).vertices
+
+        # Determine layer
+        layer_name = self._determine_element_layer()
+
+        if layer_name == "PENDING":
+            # Use simple size-based analysis
+            layer_name = self._analyze_patch_size(vertices)
+            print(f"    -> Final layer: {layer_name}")
+
+        # Set up DXF attributes
+        dxfattribs = {}
+        if self.use_ngi_layers:
+            dxfattribs["layer"] = layer_name
+            dxfattribs["color"] = 256  # ByLayer color
+        else:
+            dxfattribs["color"] = rgb_to_dxf(gc.get_rgb())
+
+        # Draw the polygon outline
+        poly = self._draw_mpl_lwpoly(
+            gc, path, transform, obj="patch", dxfattribs=dxfattribs
+        )
         if not poly:
             return
 
@@ -472,7 +575,13 @@ class RendererDxf(RendererBase):
         urls,
         offset_position,
     ):
-        # Path collections are often method icons
+        """Path collections might be method icons - force to method layer"""
+        print(f"DRAW PATH COLLECTION: Context: {self._groupd}")
+
+        # Force path collections to method layer (these are often scatter plots/symbols)
+        original_groupd = self._groupd.copy()
+        self._groupd.append("method_collection")  # Add marker
+
         for path in paths:
             combined_transform = master_transform
             if facecolors.size:
@@ -480,6 +589,9 @@ class RendererDxf(RendererBase):
             else:
                 rgbFace = None
             self._draw_mpl_patch(gc, path, combined_transform, rgbFace=rgbFace)
+
+        # Restore original context
+        self._groupd = original_groupd
 
     def draw_path(self, gc, path, transform, rgbFace=None):
         """Draw a Path instance using the given affine transform."""
@@ -514,14 +626,9 @@ class RendererDxf(RendererBase):
 
         dxfattribs = {}
         if self.use_ngi_layers:
-            layer_name = self._determine_text_layer(s)
+            layer_name = self._determine_text_layer(s, fontsize)
             dxfattribs["layer"] = layer_name
-
-            # Special handling for location text - use white color for search purposes
-            if layer_name == "FM-Location" and fontsize > 8:
-                dxfattribs["color"] = 255  # White for location search
-            else:
-                dxfattribs["color"] = 256  # ByLayer color
+            dxfattribs["color"] = 256  # ByLayer color
         else:
             dxfattribs["color"] = rgb_to_dxf(gc.get_rgb())
 
@@ -599,16 +706,6 @@ class RendererDxf(RendererBase):
         if vert and align == "CENTER":
             align = "MIDDLE"
         return align
-
-    # Required matplotlib methods
-    def open_group(self, s, gid=None):
-        """Open a grouping element with label *s*."""
-        self._groupd.append(s)
-
-    def close_group(self, s):
-        """Close a grouping element with label *s*."""
-        if self._groupd and self._groupd[-1] == s:
-            self._groupd.pop()
 
     def flipy(self):
         return False
