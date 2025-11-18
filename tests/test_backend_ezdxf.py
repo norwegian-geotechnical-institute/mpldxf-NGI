@@ -99,6 +99,9 @@ class TestDxfBackendCase(unittest.TestCase):
 
     def test_plot_with_twin_axis_and_data_outside_axes(self):
         """Test a simple line-plot command with data outside the axes."""
+        # Use non-interactive backend to avoid Tkinter issues
+        matplotlib.use("Agg")
+
         fig, ax1 = plt.subplots()
         ax2 = ax1.twinx()
         ax1.plot(range(7), [1, 2, 3, 1e5, 5, 6, 7])
@@ -196,3 +199,37 @@ class TestDxfBackendCase(unittest.TestCase):
         assert (
             len(entities) == 1
         )  # ideally we should have two lines (i.e. one broken line), but one interpolated line works as a hotfix
+
+    def test_plot_with_data_with_FM_layers(self):
+        matplotlib.backend_bases.register_backend("dxf", backend_dxf.FigureCanvasDxfFM)
+        """Test a simple line-plot command with data outside the axes."""
+        plt.plot(range(7), [1, 2, 3, 1e5, 5, 6, 7])
+        plt.ylim(0, 7)
+        plt.xlim(1, 6)
+
+        try:
+            outfile = "tests/files/test_plot_with_data_outside_axes.dxf"
+            plt.savefig(outfile, transparent=True)
+        finally:
+            plt.close()
+
+        # Load the DXF file and inspect its content
+        doc = ezdxf.readfile(outfile)
+        # Get all layers
+        layers = doc.layers
+        layer_names = [layer.dxf.name for layer in layers]
+
+        expected_layers = {
+            "FM-Frame",
+            "FM-Graph",
+            "FM-Method",
+            "FM-Text",
+            "FM-Depth",
+            "FM-Value",
+            "FM-Location",
+        }
+
+        for expected_layer in expected_layers:
+            assert expected_layer in layer_names, (
+                f"Layer {expected_layer} not found in DXF file."
+            )
