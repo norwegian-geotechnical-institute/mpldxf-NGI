@@ -83,16 +83,16 @@ def rgb_to_dxf(rgb_val):
 class RendererDxf(RendererBase):
     """
     The renderer handles drawing/rendering operations.
-    Renders the drawing using the ``ezdxf`` package with NGI layer support.
+    Renders the drawing using the ``ezdxf`` package with Field Manager layer support.
     """
 
-    def __init__(self, width, height, dpi, dxfversion, use_ngi_layers=False):
+    def __init__(self, width, height, dpi, dxfversion, use_fm_layers=False):
         RendererBase.__init__(self)
         self.height = height
         self.width = width
         self.dpi = dpi
         self.dxfversion = dxfversion
-        self.use_ngi_layers = use_ngi_layers
+        self.use_fm_layers = use_fm_layers
         self._init_drawing()
         self._groupd = []
         self._method_context = False
@@ -108,25 +108,25 @@ class RendererDxf(RendererBase):
         drawing.header["$EXTMIN"] = (0, 0, 0)
         drawing.header["$EXTMAX"] = (self.width, self.height, 0)
 
-        if self.use_ngi_layers:
-            self._create_ngi_layers(drawing)
+        if self.use_fm_layers:
+            self._create_fm_layers(drawing)
 
         self.drawing = drawing
         self.modelspace = modelspace
 
-    def _create_ngi_layers(self, drawing):
-        """Create NGI-specific layers with specific colors"""
-        ngi_layers = {
-            "FM-Frame": 7,  # White/Black - frames, ticks, gridlines
-            "FM-Graph": 1,  # Red - data graphs/lines
-            "FM-Location": 2,  # Yellow - location name text
-            "FM-Method": 3,  # Green - method icons and names
-            "FM-Depth": 4,  # Cyan - Y-axis values (depth/elevation)
-            "FM-Value": 5,  # Blue - X-axis values
-            "FM-Text": 6,  # Magenta - axis labels and other text
+    def _create_fm_layers(self, drawing):
+        """Create FM-specific layers with specific colors"""
+        fm_layers = {
+            "FM-Frame": 3,  # Green - frames, ticks, gridlines
+            "FM-Graph": 4,  # Cyan - data graphs/lines
+            "FM-Location": 6,  # Magenta - location name text
+            "FM-Method": 5,  # Blue- method icons and names
+            "FM-Depth": 1,  # Red- Y-axis values (depth/elevation)
+            "FM-Value": 8,  # Grey - X-axis values
+            "FM-Text": 2,  # Yellow - axis labels and other text
         }
 
-        for layer_name, color in ngi_layers.items():
+        for layer_name, color in fm_layers.items():
             layer = drawing.layers.add(layer_name)
             layer.dxf.color = color
 
@@ -137,7 +137,7 @@ class RendererDxf(RendererBase):
 
     def _determine_element_layer(self):
         """Determine which layer to use based on matplotlib element context"""
-        if not self.use_ngi_layers:
+        if not self.use_fm_layers:
             return "0"
 
         if not self._groupd:
@@ -145,8 +145,6 @@ class RendererDxf(RendererBase):
 
         context_str = " ".join(self._groupd).lower()
         current_element = self._groupd[-1].lower()
-
-        print(f"DETERMINE LAYER: Element='{current_element}', Context='{context_str}'")
 
         # Patches - defer to size analysis
         if current_element == "patch":
@@ -156,19 +154,15 @@ class RendererDxf(RendererBase):
         elif current_element == "line2d":
             # Frame elements: ticks and axis lines
             if any(keyword in context_str for keyword in ["tick", "matplotlib.axis"]):
-                print(f"  -> FM-Frame (tick/axis line)")
                 return "FM-Frame"
             # Data lines in axes context
             elif "axes" in context_str:
-                print(f"  -> FM-Graph (data line)")
                 return "FM-Graph"
             else:
-                print(f"  -> FM-Graph (other line)")
                 return "FM-Graph"
 
         # Collections - these are often method symbols
         elif current_element == "collection":
-            print(f"  -> FM-Method (collection)")
             return "FM-Method"
 
         # Text elements
@@ -177,10 +171,8 @@ class RendererDxf(RendererBase):
 
         # Specific frame elements
         elif any(keyword in context_str for keyword in ["tick", "matplotlib.axis"]):
-            print(f"  -> FM-Frame (frame element)")
             return "FM-Frame"
 
-        print(f"  -> 0 (default)")
         return "0"
 
     def _analyze_patch_size(self, vertices):
@@ -199,17 +191,12 @@ class RendererDxf(RendererBase):
         width = max_x - min_x
         height = max_y - min_y
 
-        print(f"    -> Patch size: {width:.1f}x{height:.1f}")
-
         # Avoid division by zero
         if height == 0 or width == 0:
-            print(f"    -> FM-Frame (zero dimension)")
             return "FM-Frame"
 
         # Calculate aspect ratio
         aspect_ratio = max(width, height) / min(width, height)
-
-        print(f"    -> Aspect ratio: {aspect_ratio:.2f}")
 
         # Shape-based classification:
         # - Very thin/long elements (spines, gridlines) -> Frame
@@ -217,21 +204,17 @@ class RendererDxf(RendererBase):
         # - Large backgrounds -> Frame
 
         if aspect_ratio > 10:  # Very long/thin = spines, gridlines, borders
-            print(f"    -> FM-Frame (thin line/border)")
             return "FM-Frame"
         elif (
             aspect_ratio < 3 and width < 100 and height < 100
         ):  # Roughly square and small = method icon
-            print(f"    -> FM-Method (square small patch - likely icon)")
             return "FM-Method"
         else:  # Everything else = frame elements
-            print(f"    -> FM-Frame (frame element)")
             return "FM-Frame"
 
     def open_group(self, s, gid=None):
         """Open a grouping element with label *s*."""
         self._groupd.append(s)
-        print(f"OPEN GROUP: {s}, Full context: {self._groupd}")
 
         # Track axes changes with a unique counter
         if s == "axes":
@@ -239,50 +222,40 @@ class RendererDxf(RendererBase):
             self._current_axes_id = self._axes_counter
             if self._current_axes_id not in self._axes_patch_count:
                 self._axes_patch_count[self._current_axes_id] = 0
-            print(f"  -> New axes #{self._current_axes_id}")
 
         # Check if we're entering a method context
         if s.lower() in ["offsetbox", "drawingarea"]:
             self._method_context = True
-            print(f"  -> METHOD CONTEXT ACTIVATED")
 
     def close_group(self, s):
         """Close a grouping element with label *s*."""
-        print(f"CLOSE GROUP: {s}, Context before: {self._groupd}")
         if self._groupd and self._groupd[-1] == s:
             self._groupd.pop()
 
         # Check if we're exiting a method context
         if s.lower() in ["offsetbox", "drawingarea"]:  # Remove "anchored"
             self._method_context = False
-            print(f"  -> METHOD CONTEXT DEACTIVATED")
 
     def _determine_text_layer(self, text_content, fontsize):
         """Determine text layer based on matplotlib context and content"""
-        if not self.use_ngi_layers:
+        if not self.use_fm_layers:
             return "0"
 
         context_str = " ".join(self._groupd).lower() if self._groupd else ""
 
-        print(f"DETERMINE TEXT LAYER: Text='{text_content}', Context='{context_str}'")
-
         # Y-axis elements -> Depth
         if any(keyword in context_str for keyword in ["yaxis", "ytick"]):
-            print(f"  -> FM-Depth (y-axis)")
             return "FM-Depth"
 
         # X-axis elements -> Value
         if any(keyword in context_str for keyword in ["xaxis", "xtick"]):
-            print(f"  -> FM-Value (x-axis)")
             return "FM-Value"
 
         # Title elements and large text -> Location
         if "title" in context_str:
             if fontsize > 8:
-                print(f"  -> FM-Location (title)")
                 return "FM-Location"
             else:
-                print(f"  -> FM-Method (title small)")
                 return "FM-Method"
 
         # Text in general axes context - check position and content
@@ -291,20 +264,16 @@ class RendererDxf(RendererBase):
             # This is often location text even if it's just a number
             if len(self._groupd) == 3:  # ['figure', 'axes', 'text']
                 if fontsize > 8:
-                    print(f"  -> FM-Location (axes title text)")
                     return "FM-Location"
                 else:
-                    print(f"  -> FM-Method (axes title text small)")
                     return "FM-Method"
 
         # Legend elements -> Method
         if "legend" in context_str:
-            print(f"  -> FM-Method (legend)")
             return "FM-Method"
 
         # Axis labels -> Text
         if any(keyword in context_str for keyword in ["xlabel", "ylabel"]):
-            print(f"  -> FM-Text (axis labels)")
             return "FM-Text"
 
         # Content-based classification
@@ -316,10 +285,8 @@ class RendererDxf(RendererBase):
             for keyword in ["boring", "bh-", "hole", "site", "location"]
         ):
             if fontsize > 8:
-                print(f"  -> FM-Location (location pattern)")
                 return "FM-Location"
             else:
-                print(f"  -> FM-Method (location pattern small)")
                 return "FM-Method"
 
         # Method text patterns
@@ -327,7 +294,6 @@ class RendererDxf(RendererBase):
             keyword in text_lower
             for keyword in ["cpt", "spt", "pmt", "dmt", "method", "test"]
         ):
-            print(f"  -> FM-Method (method pattern)")
             return "FM-Method"
 
         # Numeric patterns
@@ -335,19 +301,16 @@ class RendererDxf(RendererBase):
 
         if re.match(r"^\s*[-+]?\d*\.?\d+\s*$", text_content):
             if "y" in context_str or "ytick" in context_str:
-                print(f"  -> FM-Depth (numeric y)")
                 return "FM-Depth"
             elif "x" in context_str or "xtick" in context_str:
-                print(f"  -> FM-Value (numeric x)")
                 return "FM-Value"
 
-        print(f"  -> FM-Text (default)")
         return "FM-Text"
 
     def _get_polyline_attribs(self, gc):
         """Get polyline attributes with correct layer and color"""
         attribs = {}
-        if self.use_ngi_layers:
+        if self.use_fm_layers:
             layer_name = self._determine_element_layer()
             attribs["layer"] = layer_name
             attribs["color"] = 256  # ByLayer color
@@ -447,11 +410,10 @@ class RendererDxf(RendererBase):
         if layer_name == "PENDING":
             # Use simple size-based analysis
             layer_name = self._analyze_patch_size(vertices)
-            print(f"    -> Final layer: {layer_name}")
 
         # Set up DXF attributes
         dxfattribs = {}
-        if self.use_ngi_layers:
+        if self.use_fm_layers:
             dxfattribs["layer"] = layer_name
             dxfattribs["color"] = 256  # ByLayer color
         else:
@@ -517,7 +479,6 @@ class RendererDxf(RendererBase):
             )
             hpatht = hpath.transformed(_transform)
 
-            # print("\tHatch Path:", hpatht)
             # now place the hatch to cover the parent path
             for irow in range(-rows, rows + 1):
                 for icol in range(-cols, cols + 1):
@@ -576,7 +537,6 @@ class RendererDxf(RendererBase):
         offset_position,
     ):
         """Path collections might be method icons - force to method layer"""
-        print(f"DRAW PATH COLLECTION: Context: {self._groupd}")
 
         # Force path collections to method layer (these are often scatter plots/symbols)
         original_groupd = self._groupd.copy()
@@ -625,7 +585,7 @@ class RendererDxf(RendererBase):
         fontsize = self.points_to_pixels(prop.get_size_in_points()) / 2
 
         dxfattribs = {}
-        if self.use_ngi_layers:
+        if self.use_fm_layers:
             layer_name = self._determine_text_layer(s, fontsize)
             dxfattribs["layer"] = layer_name
             dxfattribs["color"] = 256  # ByLayer color
@@ -759,14 +719,14 @@ class FigureCanvasDxf(FigureCanvasBase):
 
     DXFVERSION = "AC1032"
 
-    def __init__(self, figure, use_ngi_layers=False):
+    def __init__(self, figure, use_fm_layers=False):
         super().__init__(figure)
-        self.use_ngi_layers = use_ngi_layers
+        self.use_fm_layers = use_fm_layers
 
     def get_dxf_renderer(self, cleared=False):
         """Get a renderer to use."""
         l, b, w, h = self.figure.bbox.bounds
-        key = w, h, self.figure.dpi, self.use_ngi_layers
+        key = w, h, self.figure.dpi, self.use_fm_layers
         try:
             self._lastKey, self.dxf_renderer
         except AttributeError:
@@ -776,7 +736,7 @@ class FigureCanvasDxf(FigureCanvasBase):
 
         if need_new_renderer:
             self.dxf_renderer = RendererDxf(
-                w, h, self.figure.dpi, self.DXFVERSION, self.use_ngi_layers
+                w, h, self.figure.dpi, self.DXFVERSION, self.use_fm_layers
             )
             self._lastKey = key
         elif cleared:
@@ -806,11 +766,11 @@ class FigureCanvasDxf(FigureCanvasBase):
         return "dxf"
 
 
-class FigureCanvasDxfNGI(FigureCanvasDxf):
-    """NGI-specific DXF canvas with predefined layers"""
+class FigureCanvasDxfFM(FigureCanvasDxf):
+    """FM-specific DXF canvas with predefined layers"""
 
     def __init__(self, figure):
-        super().__init__(figure, use_ngi_layers=True)
+        super().__init__(figure, use_fm_layers=True)
 
 
 FigureManagerDXF = FigureManagerBase
