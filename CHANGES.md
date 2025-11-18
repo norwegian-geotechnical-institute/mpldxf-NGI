@@ -1,5 +1,13 @@
 # Changes
 
+## Version 0.8.0
+
+_2025-11-18_
+
+Add:
+
+- Added support for layers for Field Manager method plots
+
 ## Version 0.7.0
 
 _2025-01-08_

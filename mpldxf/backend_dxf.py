@@ -69,11 +69,7 @@ if hasattr(sys, "frozen"):
 
 
 def rgb_to_dxf(rgb_val):
-    """Convert an RGB[A] colour to DXF colour index.
-
-    ``rgb_val`` should be a tuple of values in range 0.0 - 1.0. Any
-    alpha value is ignored.
-    """
+    """Convert an RGB[A] colour to DXF colour index."""
     if rgb_val is None:
         dxfcolor = dxf_colors.WHITE
     # change black to white
@@ -87,38 +83,239 @@ def rgb_to_dxf(rgb_val):
 class RendererDxf(RendererBase):
     """
     The renderer handles drawing/rendering operations.
-
-    Renders the drawing using the ``ezdxf`` package.
+    Renders the drawing using the ``ezdxf`` package with Field Manager layer support.
     """
 
-    def __init__(self, width, height, dpi, dxfversion):
+    def __init__(self, width, height, dpi, dxfversion, use_fm_layers=False):
         RendererBase.__init__(self)
         self.height = height
         self.width = width
         self.dpi = dpi
         self.dxfversion = dxfversion
+        self.use_fm_layers = use_fm_layers
         self._init_drawing()
         self._groupd = []
+        self._method_context = False
+        self._axes_patch_count = {}  # Track patches per axes
+        self._current_axes_id = None
+        self._axes_counter = 0  # Global axes counter
+        self._pending_patch_analysis = None  # For position-based analysis
 
     def _init_drawing(self):
-        """Create a drawing, set some global information and add
-        the layers we need.
-        """
+        """Create a drawing, set some global information and add the layers we need."""
         drawing = ezdxf.new(dxfversion=self.dxfversion)
         modelspace = drawing.modelspace()
         drawing.header["$EXTMIN"] = (0, 0, 0)
         drawing.header["$EXTMAX"] = (self.width, self.height, 0)
+
+        if self.use_fm_layers:
+            self._create_fm_layers(drawing)
+
         self.drawing = drawing
         self.modelspace = modelspace
+
+    def _create_fm_layers(self, drawing):
+        """Create FM-specific layers with specific colors"""
+        fm_layers = {
+            "FM-Frame": 3,  # Green - frames, ticks, gridlines
+            "FM-Graph": 4,  # Cyan - data graphs/lines
+            "FM-Location": 6,  # Magenta - location name text
+            "FM-Method": 5,  # Blue- method icons and names
+            "FM-Depth": 1,  # Red- Y-axis values (depth/elevation)
+            "FM-Value": 8,  # Grey - X-axis values
+            "FM-Text": 2,  # Yellow - axis labels and other text
+        }
+
+        for layer_name, color in fm_layers.items():
+            layer = drawing.layers.add(layer_name)
+            layer.dxf.color = color
 
     def clear(self):
         """Reset the renderer."""
         super(RendererDxf, self).clear()
         self._init_drawing()
 
+    def _determine_element_layer(self):
+        """Determine which layer to use based on matplotlib element context"""
+        if not self.use_fm_layers:
+            return "0"
+
+        if not self._groupd:
+            return "0"
+
+        context_str = " ".join(self._groupd).lower()
+        current_element = self._groupd[-1].lower()
+
+        # Patches - defer to size analysis
+        if current_element == "patch":
+            return "PENDING"  # Will be resolved in _draw_mpl_patch
+
+        # Line2D elements - distinguish data vs frame
+        elif current_element == "line2d":
+            # Frame elements: ticks and axis lines
+            if any(keyword in context_str for keyword in ["tick", "matplotlib.axis"]):
+                return "FM-Frame"
+            # Data lines in axes context
+            elif "axes" in context_str:
+                return "FM-Graph"
+            else:
+                return "FM-Graph"
+
+        # Collections - these are often method symbols
+        elif current_element == "collection":
+            return "FM-Method"
+
+        # Text elements
+        elif current_element == "text":
+            return "FM-Text"  # Will be overridden in text layer logic
+
+        # Specific frame elements
+        elif any(keyword in context_str for keyword in ["tick", "matplotlib.axis"]):
+            return "FM-Frame"
+
+        return "0"
+
+    def _analyze_patch_size(self, vertices):
+        """Simple shape-based classification of patches"""
+        if vertices is None or len(vertices) == 0:
+            return "FM-Frame"
+
+        # Convert to numpy array
+        verts = np.array(vertices)
+
+        # Calculate bounding box
+        min_x, min_y = np.min(verts, axis=0)
+        max_x, max_y = np.max(verts, axis=0)
+
+        # Calculate dimensions
+        width = max_x - min_x
+        height = max_y - min_y
+
+        # Avoid division by zero
+        if height == 0 or width == 0:
+            return "FM-Frame"
+
+        # Calculate aspect ratio
+        aspect_ratio = max(width, height) / min(width, height)
+
+        # Shape-based classification:
+        # - Very thin/long elements (spines, gridlines) -> Frame
+        # - Square-ish elements (method icons) -> Method
+        # - Large backgrounds -> Frame
+
+        if aspect_ratio > 10:  # Very long/thin = spines, gridlines, borders
+            return "FM-Frame"
+        elif (
+            aspect_ratio < 3 and width < 100 and height < 100
+        ):  # Roughly square and small = method icon
+            return "FM-Method"
+        else:  # Everything else = frame elements
+            return "FM-Frame"
+
+    def open_group(self, s, gid=None):
+        """Open a grouping element with label *s*."""
+        self._groupd.append(s)
+
+        # Track axes changes with a unique counter
+        if s == "axes":
+            self._axes_counter += 1
+            self._current_axes_id = self._axes_counter
+            if self._current_axes_id not in self._axes_patch_count:
+                self._axes_patch_count[self._current_axes_id] = 0
+
+        # Check if we're entering a method context
+        if s.lower() in ["offsetbox", "drawingarea"]:
+            self._method_context = True
+
+    def close_group(self, s):
+        """Close a grouping element with label *s*."""
+        if self._groupd and self._groupd[-1] == s:
+            self._groupd.pop()
+
+        # Check if we're exiting a method context
+        if s.lower() in ["offsetbox", "drawingarea"]:  # Remove "anchored"
+            self._method_context = False
+
+    def _determine_text_layer(self, text_content, fontsize):
+        """Determine text layer based on matplotlib context and content"""
+        if not self.use_fm_layers:
+            return "0"
+
+        context_str = " ".join(self._groupd).lower() if self._groupd else ""
+
+        # Y-axis elements -> Depth
+        if any(keyword in context_str for keyword in ["yaxis", "ytick"]):
+            return "FM-Depth"
+
+        # X-axis elements -> Value
+        if any(keyword in context_str for keyword in ["xaxis", "xtick"]):
+            return "FM-Value"
+
+        # Title elements and large text -> Location
+        if "title" in context_str:
+            if fontsize > 8:
+                return "FM-Location"
+            else:
+                return "FM-Method"
+
+        # Text in general axes context - check position and content
+        if "axes" in context_str:
+            # Check if it's a large title-like text at top of plot
+            # This is often location text even if it's just a number
+            if len(self._groupd) == 3:  # ['figure', 'axes', 'text']
+                if fontsize > 8:
+                    return "FM-Location"
+                else:
+                    return "FM-Method"
+
+        # Legend elements -> Method
+        if "legend" in context_str:
+            return "FM-Method"
+
+        # Axis labels -> Text
+        if any(keyword in context_str for keyword in ["xlabel", "ylabel"]):
+            return "FM-Text"
+
+        # Content-based classification
+        text_lower = text_content.lower()
+
+        # Location text patterns
+        if any(
+            keyword in text_lower
+            for keyword in ["boring", "bh-", "hole", "site", "location"]
+        ):
+            if fontsize > 8:
+                return "FM-Location"
+            else:
+                return "FM-Method"
+
+        # Method text patterns
+        if any(
+            keyword in text_lower
+            for keyword in ["cpt", "spt", "pmt", "dmt", "method", "test"]
+        ):
+            return "FM-Method"
+
+        # Numeric patterns
+        import re
+
+        if re.match(r"^\s*[-+]?\d*\.?\d+\s*$", text_content):
+            if "y" in context_str or "ytick" in context_str:
+                return "FM-Depth"
+            elif "x" in context_str or "xtick" in context_str:
+                return "FM-Value"
+
+        return "FM-Text"
+
     def _get_polyline_attribs(self, gc):
+        """Get polyline attributes with correct layer and color"""
         attribs = {}
-        attribs["color"] = rgb_to_dxf(gc.get_rgb())
+        if self.use_fm_layers:
+            layer_name = self._determine_element_layer()
+            attribs["layer"] = layer_name
+            attribs["color"] = 256  # ByLayer color
+        else:
+            attribs["color"] = rgb_to_dxf(gc.get_rgb())
         return attribs
 
     def _clip_mpl(self, gc, vertices, obj):
@@ -167,39 +364,35 @@ class RendererDxf(RendererBase):
 
         return vertices
 
-    def _draw_mpl_lwpoly(self, gc, path, transform, obj):
-        dxfattribs = self._get_polyline_attribs(gc)
+    def _draw_mpl_lwpoly(self, gc, path, transform, obj, dxfattribs=None):
+        if dxfattribs is None:
+            dxfattribs = self._get_polyline_attribs(gc)
+
         vertices = path.transformed(transform).vertices
 
-        # clip the polygon if clip rectangle present
-
         if len(vertices) > 0:
-            if isinstance(vertices[0][0], float or np.float64):
+            if isinstance(vertices[0][0], (float, np.float64)):
                 vertices = self._clip_mpl(gc, vertices, obj=obj)
-
             else:
                 vertices = [self._clip_mpl(gc, points, obj=obj) for points in vertices]
 
-            # if vertices.
             if len(vertices) == 0:
                 entity = None
-
             else:
-                if isinstance(vertices[0][0], float or np.float64):
+                if isinstance(vertices[0][0], (float, np.float64)):
                     if vertices[0][0] != 0:
                         entity = self.modelspace.add_lwpolyline(
                             points=vertices, close=False, dxfattribs=dxfattribs
-                        )  # set close to false because it broke some arrows
+                        )
                     else:
                         entity = None
-
                 else:
                     entity = [
                         self.modelspace.add_lwpolyline(
                             points=points, close=False, dxfattribs=dxfattribs
                         )
                         for points in vertices
-                    ]  # set close to false because it broke some arrows
+                    ]
             return entity
 
     def _draw_mpl_line2d(self, gc, path, transform):
@@ -208,40 +401,57 @@ class RendererDxf(RendererBase):
     def _draw_mpl_patch(self, gc, path, transform, rgbFace=None):
         """Draw a matplotlib patch object"""
 
-        poly = self._draw_mpl_lwpoly(gc, path, transform, obj="patch")
+        # Get vertices for size analysis
+        vertices = path.transformed(transform).vertices
+
+        # Determine layer
+        layer_name = self._determine_element_layer()
+
+        if layer_name == "PENDING":
+            # Use simple size-based analysis
+            layer_name = self._analyze_patch_size(vertices)
+
+        # Set up DXF attributes
+        dxfattribs = {}
+        if self.use_fm_layers:
+            dxfattribs["layer"] = layer_name
+            dxfattribs["color"] = 256  # ByLayer color
+        else:
+            dxfattribs["color"] = rgb_to_dxf(gc.get_rgb())
+
+        # Draw the polygon outline
+        poly = self._draw_mpl_lwpoly(
+            gc, path, transform, obj="patch", dxfattribs=dxfattribs
+        )
         if not poly:
             return
+
         # check to see if the patch is filled
         if rgbFace is not None:
             if type(poly) == list:
                 for pol in poly:
-                    hatch = self.modelspace.add_hatch(color=rgb_to_dxf(rgbFace))
+                    hatch = self.modelspace.add_hatch(
+                        color=rgb_to_dxf(rgbFace), dxfattribs=dxfattribs
+                    )
                     hpath = hatch.paths.add_polyline_path(
-                        # get path vertices from associated LWPOLYLINE entity
                         pol.get_points(format="xyb"),
-                        # get closed state also from associated LWPOLYLINE entity
                         is_closed=pol.closed,
                     )
-
-                    # Set association between boundary path and LWPOLYLINE
                     hatch.associate(hpath, [pol])
             else:
-                hatch = self.modelspace.add_hatch(color=rgb_to_dxf(rgbFace))
+                hatch = self.modelspace.add_hatch(
+                    color=rgb_to_dxf(rgbFace), dxfattribs=dxfattribs
+                )
                 hpath = hatch.paths.add_polyline_path(
-                    # get path vertices from associated LWPOLYLINE entity
                     poly.get_points(format="xyb"),
-                    # get closed state also from associated LWPOLYLINE entity
                     is_closed=poly.closed,
                 )
-
-                # Set association between boundary path and LWPOLYLINE
                 hatch.associate(hpath, [poly])
 
         self._draw_mpl_hatch(gc, path, transform, pline=poly)
 
     def _draw_mpl_hatch(self, gc, path, transform, pline):
         """Draw MPL hatch"""
-
         hatch = gc.get_hatch()
         if hatch is not None:
             # find extents and center of the original unclipped parent path
@@ -269,7 +479,6 @@ class RendererDxf(RendererBase):
             )
             hpatht = hpath.transformed(_transform)
 
-            # print("\tHatch Path:", hpatht)
             # now place the hatch to cover the parent path
             for irow in range(-rows, rows + 1):
                 for icol in range(-cols, cols + 1):
@@ -327,124 +536,122 @@ class RendererDxf(RendererBase):
         urls,
         offset_position,
     ):
+        """Path collections might be method icons - force to method layer"""
+
+        # Force path collections to method layer (these are often scatter plots/symbols)
+        original_groupd = self._groupd.copy()
+        self._groupd.append("method_collection")  # Add marker
+
         for path in paths:
             combined_transform = master_transform
             if facecolors.size:
                 rgbFace = facecolors[0] if facecolors is not None else None
             else:
                 rgbFace = None
-            # Draw each path as a filled patch
             self._draw_mpl_patch(gc, path, combined_transform, rgbFace=rgbFace)
 
+        # Restore original context
+        self._groupd = original_groupd
+
     def draw_path(self, gc, path, transform, rgbFace=None):
-        # print('\nEntered ###DRAW_PATH###')
-        # print('\t', self._groupd)
-        # print('\t', gc.__dict__, rgbFace)
-        # print('\t', gc.get_sketch_params())
-        # print('\tMain Path', path.__dict__)
-        # hatch = gc.get_hatch()
-        # if hatch is not None:
-        #     print('\tHatch Path', gc.get_hatch_path().__dict__)
+        """Draw a Path instance using the given affine transform."""
+        if len(self._groupd) > 0:
+            if self._groupd[-1] == "patch":
+                self._draw_mpl_patch(gc, path, transform, rgbFace)
+            elif self._groupd[-1] == "line2d":
+                self._draw_mpl_line2d(gc, path, transform)
+        else:
+            # Default to patch
+            self._draw_mpl_patch(gc, path, transform, rgbFace)
 
-        if self._groupd[-1] == "patch":
-            # print('Draw Patch')
-            line = self._draw_mpl_patch(gc, path, transform, rgbFace)
-
-        elif self._groupd[-1] == "line2d":
-            line = self._draw_mpl_line2d(gc, path, transform)
-
-    # Note if this is used then tick marks and lines with markers go through this function
     def draw_markers(self, gc, marker_path, marker_trans, path, trans, rgbFace=None):
-        # print('\nEntered ###DRAW_MARKERS###')
-        # print('\t', self._groupd)
-        # print('\t', gc.__dict__)
-        # print('\tMarker Path:', type(marker_path), marker_path.transformed(marker_trans).__dict__)
-        # print('\tPath:', type(path), path.transformed(trans).__dict__)
-        if (self._groupd[-1] == "line2d") & ("tick" in self._groupd[-2]):
+        """Draw markers at each of the vertices in path."""
+        if (
+            len(self._groupd) > 0
+            and self._groupd[-1] == "line2d"
+            and len(self._groupd) > 1
+            and "tick" in self._groupd[-2]
+        ):
             newpath = path.transformed(trans)
             dx, dy = newpath.vertices[0]
             _trans = marker_trans + Affine2D().translate(dx, dy)
-            line = self._draw_mpl_line2d(gc, marker_path, _trans)
-        # print('\tLeft ###DRAW_MARKERS###')
-
-    def draw_image(self, gc, x, y, im):
-        pass
+            self._draw_mpl_line2d(gc, marker_path, _trans)
 
     def draw_text(self, gc, x, y, s, prop, angle, ismath=False, mtext=None):
-        # print('\nEntered ###DRAW_TEXT###')
-        # print('\t', self._groupd)
-        # print('\t', gc.__dict__)
+        """Draw text with proper layer assignment"""
         if mtext is None:
-            pass
+            return
+
+        fontsize = self.points_to_pixels(prop.get_size_in_points()) / 2
+
+        dxfattribs = {}
+        if self.use_fm_layers:
+            layer_name = self._determine_text_layer(s, fontsize)
+            dxfattribs["layer"] = layer_name
+            dxfattribs["color"] = 256  # ByLayer color
         else:
-            fontsize = self.points_to_pixels(prop.get_size_in_points()) / 2
-            dxfcolor = rgb_to_dxf(gc.get_rgb())
+            dxfattribs["color"] = rgb_to_dxf(gc.get_rgb())
 
-            s = s.replace("\u2212", "-")
-            s.encode("ascii", "ignore").decode()
-            if s[0] == "$":
-                pattern = r"\\mathbf\{(.*?)\}"
-                stripped_text = re.sub(pattern, r"\1", s)
-                stripped_text = re.sub(r"[$]", "", stripped_text)
-                stripped_text = re.sub(r"\\/", " ", stripped_text)
-                text = self.modelspace.add_text(
-                    stripped_text,
-                    height=fontsize,
-                    rotation=angle,
-                    dxfattribs={"color": dxfcolor},
-                )
-            else:
-                text = self.modelspace.add_text(
-                    s,
-                    height=fontsize,
-                    rotation=angle,
-                    dxfattribs={"color": dxfcolor},
-                )
-            try:
-                stripped_text
-            except NameError:
-                pass
+        # Process text content
+        s = s.replace("\u2212", "-")
+        s.encode("ascii", "ignore").decode()
 
-            if angle == 90.0:
-                if mtext._rotation_mode == "anchor":
-                    halign = self._map_align(mtext.get_ha(), vert=False)
-                else:
-                    halign = "RIGHT"
-                valign = self._map_align(mtext.get_va(), vert=True)
-            else:
+        if s and len(s) > 0 and s[0] == "$":
+            pattern = r"\\mathbf\{(.*?)\}"
+            stripped_text = re.sub(pattern, r"\1", s)
+            stripped_text = re.sub(r"[$]", "", stripped_text)
+            stripped_text = re.sub(r"\\/", " ", stripped_text)
+            text = self.modelspace.add_text(
+                stripped_text,
+                height=fontsize,
+                rotation=angle,
+                dxfattribs=dxfattribs,
+            )
+        else:
+            text = self.modelspace.add_text(
+                s,
+                height=fontsize,
+                rotation=angle,
+                dxfattribs=dxfattribs,
+            )
+
+        # Text alignment
+        if angle == 90.0:
+            if mtext._rotation_mode == "anchor":
                 halign = self._map_align(mtext.get_ha(), vert=False)
-                valign = self._map_align(mtext.get_va(), vert=True)
+            else:
+                halign = "RIGHT"
+            valign = self._map_align(mtext.get_va(), vert=True)
+        else:
+            halign = self._map_align(mtext.get_ha(), vert=False)
+            valign = self._map_align(mtext.get_va(), vert=True)
 
-            align = valign
-            if align:
-                align += "_"
-            align += halign
+        align = valign
+        if align:
+            align += "_"
+        align += halign
 
-            # need to create a TextEntityAlignment to work with ezdxf
-            alignment_map = {
-                "TOP_LEFT": TextEntityAlignment.TOP_LEFT,
-                "TOP_CENTER": TextEntityAlignment.TOP_CENTER,
-                "TOP_RIGHT": TextEntityAlignment.TOP_RIGHT,
-                "MIDDLE_LEFT": TextEntityAlignment.MIDDLE_LEFT,
-                "MIDDLE_CENTER": TextEntityAlignment.MIDDLE_CENTER,
-                "MIDDLE_RIGHT": TextEntityAlignment.MIDDLE_RIGHT,
-                "BOTTOM_LEFT": TextEntityAlignment.BOTTOM_LEFT,
-                "BOTTOM_CENTER": TextEntityAlignment.BOTTOM_CENTER,
-                "BOTTOM_RIGHT": TextEntityAlignment.BOTTOM_RIGHT,
-                "LEFT": TextEntityAlignment.LEFT,
-                "CENTER": TextEntityAlignment.CENTER,
-                "RIGHT": TextEntityAlignment.RIGHT,
-            }
+        alignment_map = {
+            "TOP_LEFT": TextEntityAlignment.TOP_LEFT,
+            "TOP_CENTER": TextEntityAlignment.TOP_CENTER,
+            "TOP_RIGHT": TextEntityAlignment.TOP_RIGHT,
+            "MIDDLE_LEFT": TextEntityAlignment.MIDDLE_LEFT,
+            "MIDDLE_CENTER": TextEntityAlignment.MIDDLE_CENTER,
+            "MIDDLE_RIGHT": TextEntityAlignment.MIDDLE_RIGHT,
+            "BOTTOM_LEFT": TextEntityAlignment.BOTTOM_LEFT,
+            "BOTTOM_CENTER": TextEntityAlignment.BOTTOM_CENTER,
+            "BOTTOM_RIGHT": TextEntityAlignment.BOTTOM_RIGHT,
+            "LEFT": TextEntityAlignment.LEFT,
+            "CENTER": TextEntityAlignment.CENTER,
+            "RIGHT": TextEntityAlignment.RIGHT,
+        }
 
-            align = alignment_map.get(align, TextEntityAlignment.BOTTOM_LEFT)
+        align = alignment_map.get(align, TextEntityAlignment.BOTTOM_LEFT)
 
-            # need to get original points for text anchoring
-            pos = mtext.get_unitless_position()
-            x, y = mtext.get_transform().transform(pos)
-
-            p1 = x, y
-            text.set_placement(p1, align=align)
-            # print('Left ###TEXT###')
+        pos = mtext.get_unitless_position()
+        x, y = mtext.get_transform().transform(pos)
+        p1 = x, y
+        text.set_placement(p1, align=align)
 
     def _map_align(self, align, vert=False):
         """Translate a matplotlib text alignment to the ezdxf alignment."""
@@ -455,18 +662,10 @@ class RendererDxf(RendererBase):
         elif align == "center_baseline":
             align = "MIDDLE"
         else:
-            # print(align)
             raise NotImplementedError
         if vert and align == "CENTER":
             align = "MIDDLE"
         return align
-
-    def open_group(self, s, gid=None):
-        # docstring inherited
-        self._groupd.append(s)
-
-    def close_group(self, s):
-        self._groupd.pop(-1)
 
     def flipy(self):
         return False
@@ -480,6 +679,37 @@ class RendererDxf(RendererBase):
     def points_to_pixels(self, points):
         return points / 72.0 * self.dpi
 
+    def draw_image(self, gc, x, y, im):
+        pass
+
+    def draw_gouraud_triangle(self, gc, points, colors, transform):
+        pass
+
+    def draw_gouraud_triangles(self, gc, triangles_array, colors_array, transform):
+        pass
+
+    def draw_quad_mesh(
+        self,
+        gc,
+        master_transform,
+        meshWidth,
+        meshHeight,
+        coordinates,
+        offsets,
+        offsetTrans,
+        facecolors,
+        antialiased,
+        edgecolors,
+    ):
+        pass
+
+    def get_text_width_height_descent(self, s, prop, ismath):
+        fontsize = prop.get_size_in_points()
+        width = len(s) * fontsize * 0.6
+        height = fontsize
+        descent = fontsize * 0.2
+        return width, height, descent
+
 
 class FigureCanvasDxf(FigureCanvasBase):
     """
@@ -487,17 +717,16 @@ class FigureCanvasDxf(FigureCanvasBase):
     API to allow the export of DXF to file.
     """
 
-    #: The DXF version to use. This can be set to another version
-    #: supported by ezdxf if desired.
     DXFVERSION = "AC1032"
 
+    def __init__(self, figure, use_fm_layers=False):
+        super().__init__(figure)
+        self.use_fm_layers = use_fm_layers
+
     def get_dxf_renderer(self, cleared=False):
-        """Get a renderer to use. Will create a new one if we don't
-        alreadty have one or if the figure dimensions or resolution have
-        changed.
-        """
+        """Get a renderer to use."""
         l, b, w, h = self.figure.bbox.bounds
-        key = w, h, self.figure.dpi
+        key = w, h, self.figure.dpi, self.use_fm_layers
         try:
             self._lastKey, self.dxf_renderer
         except AttributeError:
@@ -506,7 +735,9 @@ class FigureCanvasDxf(FigureCanvasBase):
             need_new_renderer = self._lastKey != key
 
         if need_new_renderer:
-            self.dxf_renderer = RendererDxf(w, h, self.figure.dpi, self.DXFVERSION)
+            self.dxf_renderer = RendererDxf(
+                w, h, self.figure.dpi, self.DXFVERSION, self.use_fm_layers
+            )
             self._lastKey = key
         elif cleared:
             self.dxf_renderer.clear()
@@ -520,32 +751,29 @@ class FigureCanvasDxf(FigureCanvasBase):
         self.figure.draw(renderer)
         return renderer.drawing
 
-    # Add DXF to the class-scope filetypes dictionary
     filetypes = FigureCanvasBase.filetypes.copy()
     filetypes["dxf"] = "DXF"
 
     def print_dxf(self, filename=None, *args, **kwargs):
-        """
-        Write out a DXF file.
-        """
+        """Write out a DXF file."""
         drawing = self.draw()
-        # Check if filename is a BytesIO instance
         if isinstance(filename, StringIO):
-            # ezdxf can only write to a string or a file (not BytesIO directly)
             drawing.write(filename)
         else:
-            drawing.saveas(filename)  # Use saveas() for file paths
+            drawing.saveas(filename)
 
     def get_default_filetype(self):
         return "dxf"
 
 
+class FigureCanvasDxfFM(FigureCanvasDxf):
+    """FM-specific DXF canvas with predefined layers"""
+
+    def __init__(self, figure):
+        super().__init__(figure, use_fm_layers=True)
+
+
 FigureManagerDXF = FigureManagerBase
 
-########################################################################
-#
-# Now just provide the standard names that backend.__init__ is expecting
-#
-########################################################################
-
+# Standard names that backend.__init__ is expecting
 FigureCanvas = FigureCanvasDxf
