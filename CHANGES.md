@@ -6,7 +6,7 @@ _2025-11-18_
 
 Add:
 
-- Added support for layering for Field Manager method plots
+- Added support for layers for Field Manager method plots
 
 ## Version 0.7.0
 
