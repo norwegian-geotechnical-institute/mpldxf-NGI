@@ -26,13 +26,12 @@ import ezdxf
 import matplotlib
 from matplotlib import pyplot as plt
 import numpy as np
-from numpy.random import random
-import pytest
 
 from mpldxf import backend_dxf
 
 
 matplotlib.backend_bases.register_backend("dxf", backend_dxf.FigureCanvas)
+matplotlib.use("Agg")
 
 
 class TestDxfBackendCase(unittest.TestCase):
@@ -100,7 +99,6 @@ class TestDxfBackendCase(unittest.TestCase):
     def test_plot_with_twin_axis_and_data_outside_axes(self):
         """Test a simple line-plot command with data outside the axes."""
         # Use non-interactive backend to avoid Tkinter issues
-        matplotlib.use("Agg")
 
         fig, ax1 = plt.subplots()
         ax2 = ax1.twinx()

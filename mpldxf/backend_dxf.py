@@ -161,9 +161,17 @@ class RendererDxf(RendererBase):
             else:
                 return "FM-Graph"
 
-        # Collections - these are often method symbols
+        # Collections - check what type
         elif current_element == "collection":
             return "FM-Method"
+
+        # Method collection marker added by draw_path_collection for fills
+        elif current_element == "method_collection":
+            # Check if it's a fill_between (data) or actual method icon
+            if "fillbetween" in context_str:
+                return "FM-Graph"
+            else:
+                return "FM-Method"
 
         # Text elements
         elif current_element == "text":
@@ -175,7 +183,7 @@ class RendererDxf(RendererBase):
 
         return "0"
 
-    def _analyze_patch_size(self, vertices):
+    def _analyze_patch_size(self, vertices, gc):
         """Simple shape-based classification of patches"""
         if vertices is None or len(vertices) == 0:
             return "FM-Frame"
@@ -191,6 +199,12 @@ class RendererDxf(RendererBase):
         width = max_x - min_x
         height = max_y - min_y
 
+        # Check if patch has hatching - hatched patches are DATA (fill_betweenx, bars, boxplots)
+        has_hatch = gc.get_hatch() is not None
+
+        if has_hatch:
+            return "FM-Graph"
+
         # Avoid division by zero
         if height == 0 or width == 0:
             return "FM-Frame"
@@ -203,14 +217,10 @@ class RendererDxf(RendererBase):
         # - Square-ish elements (method icons) -> Method
         # - Large backgrounds -> Frame
 
-        if aspect_ratio > 10:  # Very long/thin = spines, gridlines, borders
+        if aspect_ratio > 50:  # Very long/thin = spines, gridlines, borders
             return "FM-Frame"
-        elif (
-            aspect_ratio < 3 and width < 100 and height < 100
-        ):  # Roughly square and small = method icon
+        else:
             return "FM-Method"
-        else:  # Everything else = frame elements
-            return "FM-Frame"
 
     def open_group(self, s, gid=None):
         """Open a grouping element with label *s*."""
@@ -251,6 +261,10 @@ class RendererDxf(RendererBase):
         if any(keyword in context_str for keyword in ["xaxis", "xtick"]):
             return "FM-Value"
 
+        # Legend elements -> Text (changed from Method)
+        if "legend" in context_str:
+            return "FM-Text"
+
         # Title elements and large text -> Location
         if "title" in context_str:
             if fontsize > 8:
@@ -267,10 +281,6 @@ class RendererDxf(RendererBase):
                     return "FM-Location"
                 else:
                     return "FM-Method"
-
-        # Legend elements -> Method
-        if "legend" in context_str:
-            return "FM-Method"
 
         # Axis labels -> Text
         if any(keyword in context_str for keyword in ["xlabel", "ylabel"]):
@@ -408,8 +418,8 @@ class RendererDxf(RendererBase):
         layer_name = self._determine_element_layer()
 
         if layer_name == "PENDING":
-            # Use simple size-based analysis
-            layer_name = self._analyze_patch_size(vertices)
+            # Analyze patch to determine layer - PASS gc for hatch detection
+            layer_name = self._analyze_patch_size(vertices, gc)
 
         # Set up DXF attributes
         dxfattribs = {}
@@ -430,95 +440,110 @@ class RendererDxf(RendererBase):
         if rgbFace is not None:
             if type(poly) == list:
                 for pol in poly:
-                    hatch = self.modelspace.add_hatch(
-                        color=rgb_to_dxf(rgbFace), dxfattribs=dxfattribs
-                    )
+                    hatch = self.modelspace.add_hatch(color=256, dxfattribs=dxfattribs)
                     hpath = hatch.paths.add_polyline_path(
                         pol.get_points(format="xyb"),
                         is_closed=pol.closed,
                     )
                     hatch.associate(hpath, [pol])
             else:
-                hatch = self.modelspace.add_hatch(
-                    color=rgb_to_dxf(rgbFace), dxfattribs=dxfattribs
-                )
+                hatch = self.modelspace.add_hatch(color=256, dxfattribs=dxfattribs)
                 hpath = hatch.paths.add_polyline_path(
                     poly.get_points(format="xyb"),
                     is_closed=poly.closed,
                 )
                 hatch.associate(hpath, [poly])
+        self._draw_mpl_hatch(gc, path, transform, pline=poly, patch_layer=layer_name)
 
-        self._draw_mpl_hatch(gc, path, transform, pline=poly)
+    def _draw_mpl_hatch(self, gc, path, transform, pline=None, patch_layer=None):
+        """Draw hatching from matplotlib hatch patterns"""
+        if gc.get_hatch() is None or pline is None:
+            return
 
-    def _draw_mpl_hatch(self, gc, path, transform, pline):
-        """Draw MPL hatch"""
-        hatch = gc.get_hatch()
-        if hatch is not None:
-            # find extents and center of the original unclipped parent path
-            ext = path.get_extents(transform=transform)
-            dx = ext.x1 - ext.x0
-            cx = 0.5 * (ext.x1 + ext.x0)
-            dy = ext.y1 - ext.y0
-            cy = 0.5 * (ext.y1 + ext.y0)
+        # Use the patch's layer if provided, otherwise determine from context
+        if patch_layer is not None:
+            layer_name = patch_layer
+        elif self.use_fm_layers:
+            # Fallback
+            layer_name = "FM-Graph"
+        else:
+            layer_name = "0"
 
-            # matplotlib uses a 1-inch square hatch, so find out how many rows
-            # and columns will be needed to fill the parent path
-            rows, cols = math.ceil(dy / self.dpi) - 1, math.ceil(dx / self.dpi) - 1
+        if self.use_fm_layers:
+            dxfattribs = {
+                "layer": layer_name,
+                "color": 256,  # ByLayer
+            }
+        else:
+            dxfattribs = {"color": rgb_to_dxf(gc.get_rgb())}
 
-            # get color of the hatch
-            rgb = gc.get_hatch_color()
-            dxfcolor = rgb_to_dxf(rgb)
+        # find extents and center of the original unclipped parent path
+        ext = path.get_extents(transform=transform)
+        dx = ext.x1 - ext.x0
+        cx = 0.5 * (ext.x1 + ext.x0)
+        dy = ext.y1 - ext.y0
+        cy = 0.5 * (ext.y1 + ext.y0)
 
-            # get hatch paths
-            hpath = gc.get_hatch_path()
+        # matplotlib uses a 1-inch square hatch, so find out how many rows
+        # and columns will be needed to fill the parent path
+        rows, cols = math.ceil(dy / self.dpi) - 1, math.ceil(dx / self.dpi) - 1
 
-            # this is a tranform that produces a properly scaled hatch in the center
-            # of the parent hatch
-            _transform = (
-                Affine2D().translate(-0.5, -0.5).scale(self.dpi).translate(cx, cy)
-            )
-            hpatht = hpath.transformed(_transform)
+        # get color of the hatch
+        rgb = gc.get_hatch_color()
+        dxfcolor = rgb_to_dxf(rgb)
 
-            # now place the hatch to cover the parent path
-            for irow in range(-rows, rows + 1):
-                for icol in range(-cols, cols + 1):
-                    # transformation from the center of the parent path
-                    _trans = Affine2D().translate(icol * self.dpi, irow * self.dpi)
-                    # transformed hatch
-                    _hpath = hpatht.transformed(_trans)
+        # get hatch paths
+        hpath = gc.get_hatch_path()
 
-                    # turn into list of vertices to make up polygon
-                    _path = _hpath.to_polygons(closed_only=False)
+        # this is a tranform that produces a properly scaled hatch in the center
+        # of the parent hatch
+        _transform = Affine2D().translate(-0.5, -0.5).scale(self.dpi).translate(cx, cy)
+        hpatht = hpath.transformed(_transform)
 
-                    for vertices in _path:
-                        if pline is not None:
-                            for (
-                                pline_obj
-                            ) in pline:  # Assuming pline is a list of objects
-                                if len(vertices) == 2:
-                                    clippoly = Polygon(
-                                        pline_obj.vertices()
-                                    )  # Access vertices of each object in the list
-                                    line = LineString(vertices)
-                                    clipped = line.intersection(clippoly).coords
-                                else:
-                                    clipped = ezdxf.math.clipping.ClippingRect2d(
-                                        pline_obj.vertices(), vertices
-                                    )
-                        else:
-                            clipped = []
+        # now place the hatch to cover the parent path
+        for irow in range(-rows, rows + 1):
+            for icol in range(-cols, cols + 1):
+                # transformation from the center of the parent path
+                _trans = Affine2D().translate(icol * self.dpi, irow * self.dpi)
+                # transformed hatch
+                _hpath = hpatht.transformed(_trans)
 
-                        # if there is something to plot
-                        if len(clipped) > 0:
+                # turn into list of vertices to make up polygon
+                _path = _hpath.to_polygons(closed_only=False)
+
+                for vertices in _path:
+                    if pline is not None:
+                        for pline_obj in pline:  # Assuming pline is a list of objects
                             if len(vertices) == 2:
-                                attrs = {"color": dxfcolor}
-                                self.modelspace.add_lwpolyline(
-                                    points=clipped, dxfattribs=attrs
-                                )
+                                clippoly = Polygon(
+                                    pline_obj.vertices()
+                                )  # Access vertices of each object in the list
+                                line = LineString(vertices)
+                                clipped = line.intersection(clippoly).coords
                             else:
-                                # A non-filled polygon or a line - use LWPOLYLINE entity
-                                hatch = self.modelspace.add_hatch(color=dxfcolor)
-                                line = hatch.paths.add_polyline_path(clipped)
+                                clipped = ezdxf.math.clipping.ClippingRect2d(
+                                    pline_obj.vertices(), vertices
+                                )
+                    else:
+                        clipped = []
+
+                    # if there is something to plot
+                    if len(clipped) > 0:
+                        if len(vertices) == 2:
+                            attrs = {"color": dxfcolor}
+                            if self.use_fm_layers:
+                                attrs["layer"] = layer_name
+                                attrs["color"] = 256  # ByLayer
+                            self.modelspace.add_lwpolyline(
+                                points=clipped, dxfattribs=attrs
+                            )
+                        else:
+                            # A non-filled polygon or a line - use LWPOLYLINE entity
+                            hatch_attrs = dxfattribs.copy()
+                            hatch = self.modelspace.add_hatch(
+                                color=256, dxfattribs=hatch_attrs
+                            )
+                            line = hatch.paths.add_polyline_path(clipped)
 
     def draw_path_collection(
         self,
@@ -536,11 +561,11 @@ class RendererDxf(RendererBase):
         urls,
         offset_position,
     ):
-        """Path collections might be method icons - force to method layer"""
+        """Path collections might be fills or method icons"""
 
-        # Force path collections to method layer (these are often scatter plots/symbols)
+        # Mark context for layer determination
         original_groupd = self._groupd.copy()
-        self._groupd.append("method_collection")  # Add marker
+        self._groupd.append("method_collection")
 
         for path in paths:
             combined_transform = master_transform
@@ -576,6 +601,103 @@ class RendererDxf(RendererBase):
             dx, dy = newpath.vertices[0]
             _trans = marker_trans + Affine2D().translate(dx, dy)
             self._draw_mpl_line2d(gc, marker_path, _trans)
+            return
+
+        # Get all vertices where markers should be placed
+        vertices = path.transformed(trans).vertices
+
+        # Determine layer for markers (typically data points)
+        if self.use_fm_layers:
+            # Data markers should go to FM-Graph layer
+            if "line2d" in self._groupd or any(
+                "axes" in g.lower() for g in self._groupd
+            ):
+                layer_name = "FM-Graph"
+            else:
+                layer_name = self._determine_element_layer()
+        else:
+            layer_name = "0"
+
+        # Get marker path information
+        marker_vertices = marker_path.vertices
+        marker_codes = marker_path.codes  # Path codes tell us about the structure
+
+        # Set up attributes
+        dxfattribs = {}
+        if self.use_fm_layers:
+            dxfattribs["layer"] = layer_name
+            dxfattribs["color"] = 256  # ByLayer
+        else:
+            dxfattribs["color"] = rgb_to_dxf(gc.get_rgb())
+
+        # Parse marker into separate line segments based on path codes
+        # MOVETO (1) starts a new segment, LINETO (2) continues, CLOSEPOLY (79) closes
+        from matplotlib.path import Path as MplPath
+
+        segments = []
+        current_segment = []
+
+        if marker_codes is not None:
+            for i, (vertex, code) in enumerate(zip(marker_vertices, marker_codes)):
+                if code == MplPath.MOVETO:
+                    # Start new segment
+                    if current_segment:
+                        segments.append(np.array(current_segment))
+                    current_segment = [vertex]
+                elif code == MplPath.LINETO:
+                    # Continue segment
+                    current_segment.append(vertex)
+                elif code == MplPath.CLOSEPOLY:
+                    # Close segment (but don't actually close for markers)
+                    if current_segment:
+                        segments.append(np.array(current_segment))
+                        current_segment = []
+
+            # Don't forget last segment
+            if current_segment:
+                segments.append(np.array(current_segment))
+        else:
+            # Fallback: split on NaN values if no codes
+            for v in marker_vertices:
+                if np.isnan(v).any():
+                    if current_segment:
+                        segments.append(np.array(current_segment))
+                        current_segment = []
+                else:
+                    current_segment.append(v)
+
+            if current_segment:
+                segments.append(np.array(current_segment))
+
+        # Draw marker at each vertex position
+        for vertex in vertices:
+            if np.isnan(vertex).any():
+                continue
+
+            dx, dy = vertex
+
+            # Draw each segment of the marker at this position
+            for segment in segments:
+                if len(segment) == 0:
+                    continue
+
+                # Apply marker transform and position offset
+                transformed_segment = marker_trans.transform(segment)
+                positioned_segment = transformed_segment + np.array([dx, dy])
+
+                if len(positioned_segment) >= 2:  # Line segment
+                    self.modelspace.add_lwpolyline(
+                        points=positioned_segment.tolist(),
+                        close=False,  # Don't close markers
+                        dxfattribs=dxfattribs,
+                    )
+                elif len(positioned_segment) == 1:  # Single point (dot marker)
+                    point = positioned_segment[0]
+                    self.modelspace.add_circle(
+                        center=point.tolist(),
+                        radius=1.0,  # Small radius for point marker
+                        dxfattribs=dxfattribs,
+                    )
 
     def draw_text(self, gc, x, y, s, prop, angle, ismath=False, mtext=None):
         """Draw text with proper layer assignment"""

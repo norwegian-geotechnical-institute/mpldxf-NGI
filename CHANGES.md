@@ -1,5 +1,17 @@
 # Changes
 
+## Version 0.9.0
+
+_2025-11-19_
+
+Add:
+
+- Add support for drawing markers in plots
+
+Fix:
+
+- Fixed issue with some entities ending up in wrong FM-layers
+
 ## Version 0.8.0
 
 _2025-11-18_
