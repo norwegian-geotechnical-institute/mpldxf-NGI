@@ -98,7 +98,6 @@ class TestDxfBackendCase(unittest.TestCase):
 
     def test_plot_with_twin_axis_and_data_outside_axes(self):
         """Test a simple line-plot command with data outside the axes."""
-        # Use non-interactive backend to avoid Tkinter issues
 
         fig, ax1 = plt.subplots()
         ax2 = ax1.twinx()

@@ -70,6 +70,7 @@ if hasattr(sys, "frozen"):
 
 def rgb_to_dxf(rgb_val):
     """Convert an RGB[A] colour to DXF colour index."""
+    """Convert an RGB[A] colour to DXF colour index."""
     if rgb_val is None:
         dxfcolor = dxf_colors.WHITE
     # change black to white
