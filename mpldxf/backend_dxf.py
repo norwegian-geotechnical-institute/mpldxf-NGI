@@ -174,6 +174,7 @@ class RendererDxf(RendererBase):
                 return "FM-Graph"
 
         # Collections - check what type
+        # Collections - check what type
         elif current_element == "collection":
             return "FM-Graph"
 
@@ -196,7 +197,7 @@ class RendererDxf(RendererBase):
         if not self.use_fm_layers:
             return "0"
 
-        # PRIORITY 1: Check if ANY active group has method_symbol gid
+        # Check if ANY active group has method_symbol gid
         for group_name in self._groupd:
             if self._group_gids.get(group_name) == "method_symbol":
                 return "FM-Method"
@@ -392,6 +393,7 @@ class RendererDxf(RendererBase):
             if type(poly) == list:
                 for pol in poly:
                     hatch = self.modelspace.add_hatch(color=256, dxfattribs=dxfattribs)
+                    hatch = self.modelspace.add_hatch(color=256, dxfattribs=dxfattribs)
                     hpath = hatch.paths.add_polyline_path(
                         pol.get_points(format="xyb"),
                         is_closed=pol.closed,
@@ -399,11 +401,13 @@ class RendererDxf(RendererBase):
                     hatch.associate(hpath, [pol])
             else:
                 hatch = self.modelspace.add_hatch(color=256, dxfattribs=dxfattribs)
+                hatch = self.modelspace.add_hatch(color=256, dxfattribs=dxfattribs)
                 hpath = hatch.paths.add_polyline_path(
                     poly.get_points(format="xyb"),
                     is_closed=poly.closed,
                 )
                 hatch.associate(hpath, [poly])
+        self._draw_mpl_hatch(gc, path, transform, pline=poly, patch_layer=layer_name)
         self._draw_mpl_hatch(gc, path, transform, pline=poly, patch_layer=layer_name)
 
     def _draw_mpl_hatch(self, gc, path, transform, pline=None, patch_layer=None):
@@ -495,6 +499,7 @@ class RendererDxf(RendererBase):
     ):
         """Path collections might be fills, bars, or method icons"""
         original_groupd = self._groupd.copy()
+        self._groupd.append("method_collection")
         self._groupd.append("method_collection")
 
         for path in paths:
