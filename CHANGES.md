@@ -1,5 +1,13 @@
 # Changes
 
+## Version 1.0.0
+
+_2025-11-25_
+
+Fix:
+
+- Updated the FM-layer functionality to support bar plots
+
 ## Version 0.9.0
 
 _2025-11-19_
