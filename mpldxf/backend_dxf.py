@@ -120,6 +120,7 @@ class RendererDxf(RendererBase):
             "FM-Depth": 1,  # Red - Y-axis values (depth/elevation)
             "FM-Value": 8,  # Grey - X-axis values
             "FM-Text": 2,  # Yellow - axis labels and other text
+            "FM-Grid": 7,  # Light Blue - grid lines
         }
 
         for layer_name, color in fm_layers.items():
@@ -149,10 +150,14 @@ class RendererDxf(RendererBase):
         if not self.use_fm_layers:
             return "0"
 
-        # Check if ANY active group has method_symbol gid
+        # Check if ANY active group has gid for FM layers
         for group_name in self._groupd:
-            if self._group_gids.get(group_name) == "method_symbol":
+            if self._group_gids.get(group_name) == "FM-Method":
                 return "FM-Method"
+            if self._group_gids.get(group_name) == "FM-Grid":
+                return "FM-Grid"
+            if self._group_gids.get(group_name) == "FM-Frame":
+                return "FM-Frame"
 
         if not self._groupd:
             return "0"
@@ -199,7 +204,7 @@ class RendererDxf(RendererBase):
 
         # Check if ANY active group has method_symbol gid
         for group_name in self._groupd:
-            if self._group_gids.get(group_name) == "method_symbol":
+            if self._group_gids.get(group_name) == "FM-Method":
                 return "FM-Method"
 
         context_str = " ".join(self._groupd).lower() if self._groupd else ""

@@ -1,5 +1,11 @@
 # Changes
 
+## Version 1.0.1
+
+_2025-12-15_
+
+- Add "FM-Grid" to the FM-layers
+
 ## Version 1.0.0
 
 _2025-11-25_
