@@ -169,14 +169,11 @@ class RendererDxf(RendererBase):
         if current_element == "patch":
             return "PENDING"
 
-        # Line2D elements - distinguish data vs frame
+        # Line2D elements - data
         elif current_element == "line2d":
             if any(keyword in context_str for keyword in ["tick", "matplotlib.axis"]):
-                return "FM-Frame"
-            elif "axes" in context_str:
-                return "FM-Graph"
-            else:
-                return "FM-Graph"
+                return "FM-Grid"
+            return "FM-Graph"
 
         # Collections - check what type
         # Collections - check what type
@@ -193,7 +190,7 @@ class RendererDxf(RendererBase):
 
         # Specific frame elements
         elif any(keyword in context_str for keyword in ["tick", "matplotlib.axis"]):
-            return "FM-Frame"
+            return "FM-Grid"
 
         return "0"
 
@@ -253,7 +250,7 @@ class RendererDxf(RendererBase):
         """Simple shape-based classification of patches"""
 
         if vertices is None or len(vertices) == 0:
-            return "FM-Frame"
+            return "FM-Grid"
 
         verts = np.array(vertices)
         min_x, min_y = np.min(verts, axis=0)
@@ -268,7 +265,7 @@ class RendererDxf(RendererBase):
             return "FM-Graph"
 
         if height == 0 or width == 0:
-            return "FM-Frame"
+            return "FM-Grid"
 
         aspect_ratio = max(width, height) / min(width, height)
         context_str = " ".join(self._groupd).lower() if self._groupd else ""
@@ -278,8 +275,8 @@ class RendererDxf(RendererBase):
         if in_axes and aspect_ratio < 1000:
             return "FM-Graph"
 
-        # Default small patches -> Frame elements
-        return "FM-Frame"
+        # Default small patches -> Grid elements
+        return "FM-Grid"
 
     def _get_polyline_attribs(self, gc):
         """Get polyline attributes with correct layer and color"""
