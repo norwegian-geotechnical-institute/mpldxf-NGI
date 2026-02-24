@@ -34,7 +34,7 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
 
-from __future__ import absolute_import, division, print_function, unicode_literals
+from __future__ import absolute_import, division, unicode_literals
 from io import BytesIO, StringIO
 import os
 import sys
@@ -80,6 +80,25 @@ def rgb_to_dxf(rgb_val):
     return dxfcolor
 
 
+def is_valid_coordinate(coord):
+    """Check if a coordinate contains only finite numbers (no NaN or Inf)."""
+    coord_array = np.asarray(coord)
+    return np.all(np.isfinite(coord_array))
+
+
+def filter_invalid_coordinates(vertices):
+    """Filter out vertices with NaN or Inf values."""
+    if len(vertices) == 0:
+        return vertices
+
+    # Handle both 1D list of coordinates and 2D array of vertices
+    vertices_array = np.asarray(vertices)
+    if vertices_array.ndim == 1:
+        return vertices if is_valid_coordinate(vertices) else []
+    else:
+        return [v for v in vertices if is_valid_coordinate(v)]
+
+
 class RendererDxf(RendererBase):
     """
     The renderer handles drawing/rendering operations.
@@ -99,7 +118,8 @@ class RendererDxf(RendererBase):
 
     def _init_drawing(self):
         """Create a drawing, set some global information and add the layers we need."""
-        drawing = ezdxf.new(dxfversion=self.dxfversion)
+        # setup=True automatically adds all standard AutoCAD linetypes including DASHED, DASHED2, etc.
+        drawing = ezdxf.new(dxfversion=self.dxfversion, setup=True)
         modelspace = drawing.modelspace()
         drawing.header["$EXTMIN"] = (0, 0, 0)
         drawing.header["$EXTMAX"] = (self.width, self.height, 0)
@@ -120,7 +140,8 @@ class RendererDxf(RendererBase):
             "FM-Depth": 1,  # Red - Y-axis values (depth/elevation)
             "FM-Value": 8,  # Grey - X-axis values
             "FM-Text": 2,  # Yellow - axis labels and other text
-            "FM-Grid": 7,  # Light Blue - grid lines
+            "FM-Grid-Vertical": 7,  # Light Blue - vertical grid lines
+            "FM-Grid-Horizontal": 7,  # Light Blue - horizontal grid lines
         }
 
         for layer_name, color in fm_layers.items():
@@ -154,8 +175,10 @@ class RendererDxf(RendererBase):
         for group_name in self._groupd:
             if self._group_gids.get(group_name) == "FM-Method":
                 return "FM-Method"
-            if self._group_gids.get(group_name) == "FM-Grid":
-                return "FM-Grid"
+            if self._group_gids.get(group_name) == "FM-Grid-Vertical":
+                return "FM-Grid-Vertical"
+            if self._group_gids.get(group_name) == "FM-Grid-Horizontal":
+                return "FM-Grid-Horizontal"
             if self._group_gids.get(group_name) == "FM-Frame":
                 return "FM-Frame"
 
@@ -171,8 +194,6 @@ class RendererDxf(RendererBase):
 
         # Line2D elements - data
         elif current_element == "line2d":
-            if any(keyword in context_str for keyword in ["tick", "matplotlib.axis"]):
-                return "FM-Grid"
             return "FM-Graph"
 
         # Collections - check what type
@@ -187,10 +208,6 @@ class RendererDxf(RendererBase):
         # Text elements
         elif current_element == "text":
             return "FM-Text"
-
-        # Specific frame elements
-        elif any(keyword in context_str for keyword in ["tick", "matplotlib.axis"]):
-            return "FM-Grid"
 
         return "0"
 
@@ -249,9 +266,6 @@ class RendererDxf(RendererBase):
     def _analyze_patch_size(self, vertices, gc):
         """Simple shape-based classification of patches"""
 
-        if vertices is None or len(vertices) == 0:
-            return "FM-Grid"
-
         verts = np.array(vertices)
         min_x, min_y = np.min(verts, axis=0)
         max_x, max_y = np.max(verts, axis=0)
@@ -264,8 +278,9 @@ class RendererDxf(RendererBase):
         if has_hatch:
             return "FM-Graph"
 
-        if height == 0 or width == 0:
-            return "FM-Grid"
+        # Avoid divide by zero
+        if width == 0 or height == 0:
+            return "0"
 
         aspect_ratio = max(width, height) / min(width, height)
         context_str = " ".join(self._groupd).lower() if self._groupd else ""
@@ -275,11 +290,11 @@ class RendererDxf(RendererBase):
         if in_axes and aspect_ratio < 1000:
             return "FM-Graph"
 
-        # Default small patches -> Grid elements
-        return "FM-Grid"
+        # Default small patches -> "0"
+        return "0"
 
     def _get_polyline_attribs(self, gc):
-        """Get polyline attributes with correct layer and color"""
+        """Get polyline attributes with correct layer, color, and linetype"""
         attribs = {}
         if self.use_fm_layers:
             layer_name = self._determine_element_layer()
@@ -287,6 +302,20 @@ class RendererDxf(RendererBase):
             attribs["color"] = 256  # ByLayer color
         else:
             attribs["color"] = rgb_to_dxf(gc.get_rgb())
+
+        # Handle line style - use DASHED2 for dashed lines with ltscale=0.2
+        dashes = gc.get_dashes()
+        if dashes is not None:
+            offset, dash_list = dashes
+            if dash_list is not None and len(dash_list) > 0:
+                # Use DASHED2 for non-continuous lines
+                attribs["linetype"] = "DASHED2"
+                attribs["ltscale"] = 0.2  # Small scale for finer dash pattern
+            else:
+                attribs["linetype"] = "CONTINUOUS"
+        else:
+            attribs["linetype"] = "CONTINUOUS"
+
         return attribs
 
     def _clip_mpl(self, gc, vertices, obj):
@@ -305,8 +334,8 @@ class RendererDxf(RendererBase):
                     vertices
                 )
             elif obj == "line2d":
-                # strip nans
-                vertices = [v for v in vertices if not np.isnan(v).any()]
+                # strip nans and infinite values
+                vertices = filter_invalid_coordinates(vertices)
 
                 cliprect = Polygon(cliprect)
                 if len(vertices) == 1:
@@ -349,13 +378,20 @@ class RendererDxf(RendererBase):
                 entity = None
             else:
                 if isinstance(vertices[0][0], (float, np.float64)):
-                    if vertices[0][0] != 0:
+                    # Validate coordinates before adding to DXF
+                    vertices = filter_invalid_coordinates(vertices)
+                    if len(vertices) > 0 and vertices[0][0] != 0:
                         entity = self.modelspace.add_lwpolyline(
                             points=vertices, close=False, dxfattribs=dxfattribs
                         )
                     else:
                         entity = None
                 else:
+                    # Filter invalid coordinates from each segment
+                    vertices = [
+                        filter_invalid_coordinates(points) for points in vertices
+                    ]
+                    vertices = [v for v in vertices if len(v) > 0]
                     entity = [
                         self.modelspace.add_lwpolyline(
                             points=points, close=False, dxfattribs=dxfattribs
@@ -395,21 +431,18 @@ class RendererDxf(RendererBase):
             if type(poly) == list:
                 for pol in poly:
                     hatch = self.modelspace.add_hatch(color=256, dxfattribs=dxfattribs)
-                    hatch = self.modelspace.add_hatch(color=256, dxfattribs=dxfattribs)
-                    hpath = hatch.paths.add_polyline_path(
+                    hatch.set_solid_fill()
+                    hatch.paths.add_polyline_path(
                         pol.get_points(format="xyb"),
                         is_closed=pol.closed,
                     )
-                    hatch.associate(hpath, [pol])
             else:
                 hatch = self.modelspace.add_hatch(color=256, dxfattribs=dxfattribs)
-                hatch = self.modelspace.add_hatch(color=256, dxfattribs=dxfattribs)
-                hpath = hatch.paths.add_polyline_path(
+                hatch.set_solid_fill()
+                hatch.paths.add_polyline_path(
                     poly.get_points(format="xyb"),
                     is_closed=poly.closed,
                 )
-                hatch.associate(hpath, [poly])
-        self._draw_mpl_hatch(gc, path, transform, pline=poly, patch_layer=layer_name)
         self._draw_mpl_hatch(gc, path, transform, pline=poly, patch_layer=layer_name)
 
     def _draw_mpl_hatch(self, gc, path, transform, pline=None, patch_layer=None):
@@ -468,6 +501,10 @@ class RendererDxf(RendererBase):
                         clipped = []
 
                     if len(clipped) > 0:
+                        # Validate coordinates before adding to DXF
+                        clipped = filter_invalid_coordinates(clipped)
+
+                    if len(clipped) > 0:
                         if len(vertices) == 2:
                             attrs = {"color": dxfcolor}
                             if self.use_fm_layers:
@@ -481,7 +518,10 @@ class RendererDxf(RendererBase):
                             hatch = self.modelspace.add_hatch(
                                 color=256, dxfattribs=hatch_attrs
                             )
-                            line = hatch.paths.add_polyline_path(clipped)
+                            hatch.set_solid_fill()
+                            line = hatch.paths.add_polyline_path(
+                                clipped, is_closed=True
+                            )
 
     def draw_path_collection(
         self,
@@ -502,15 +542,68 @@ class RendererDxf(RendererBase):
         """Path collections might be fills, bars, or method icons"""
         original_groupd = self._groupd.copy()
         self._groupd.append("method_collection")
-        self._groupd.append("method_collection")
 
-        for path in paths:
-            combined_transform = master_transform
-            if facecolors.size:
-                rgbFace = facecolors[0] if facecolors is not None else None
+        # Transform offsets to data coordinates
+        if len(offsets):
+            transformed_offsets = offset_trans.transform(offsets)
+        else:
+            transformed_offsets = np.zeros((0, 2))
+
+        # Iterate through each path
+        for path_idx, path in enumerate(paths):
+            # If we have no offsets, draw once with master transform
+            if len(transformed_offsets) == 0:
+                if facecolors.size:
+                    rgbFace = facecolors[0] if facecolors is not None else None
+                else:
+                    rgbFace = None
+                self._draw_mpl_patch(gc, path, master_transform, rgbFace=rgbFace)
             else:
-                rgbFace = None
-            self._draw_mpl_patch(gc, path, combined_transform, rgbFace=rgbFace)
+                # Draw the path at each offset position
+                for offset_idx, offset in enumerate(transformed_offsets):
+                    # Build the combined transform
+                    # Start with master transform and add translation for offset
+                    from matplotlib.transforms import Affine2D
+
+                    combined_transform = master_transform + Affine2D().translate(
+                        offset[0], offset[1]
+                    )
+
+                    # If we have specific transforms for each instance, apply them
+                    if len(all_transforms):
+                        # all_transforms is typically a numpy array of 2x3 or 3x3 matrices
+                        transform_idx = offset_idx % len(all_transforms)
+                        path_transform_matrix = all_transforms[transform_idx]
+
+                        # Convert matrix to Affine2D if needed
+                        if isinstance(path_transform_matrix, np.ndarray):
+                            # Create Affine2D from matrix
+                            if path_transform_matrix.shape == (3, 3):
+                                # 3x3 matrix
+                                path_transform = Affine2D(path_transform_matrix)
+                            elif path_transform_matrix.shape == (2, 3):
+                                # 2x3 matrix - convert to 3x3
+                                matrix_3x3 = np.vstack(
+                                    [path_transform_matrix, [0, 0, 1]]
+                                )
+                                path_transform = Affine2D(matrix_3x3)
+                            else:
+                                path_transform = Affine2D()  # Identity
+                        else:
+                            # Already a transform object
+                            path_transform = path_transform_matrix
+
+                        # Combine: first apply path transform, then the combined transform
+                        combined_transform = combined_transform + path_transform
+
+                    # Get face color for this instance
+                    if facecolors.size:
+                        color_idx = offset_idx % len(facecolors)
+                        rgbFace = facecolors[color_idx]
+                    else:
+                        rgbFace = None
+
+                    self._draw_mpl_patch(gc, path, combined_transform, rgbFace=rgbFace)
 
         self._groupd = original_groupd
 
@@ -541,7 +634,10 @@ class RendererDxf(RendererBase):
         vertices = path.transformed(trans).vertices
 
         if self.use_fm_layers:
-            if "line2d" in self._groupd or any(
+            # Check if this is a tick marker - these should go to FM-Frame
+            if any("tick" in g.lower() for g in self._groupd):
+                layer_name = "FM-Frame"
+            elif "line2d" in self._groupd or any(
                 "axes" in g.lower() for g in self._groupd
             ):
                 layer_name = "FM-Graph"
@@ -563,6 +659,7 @@ class RendererDxf(RendererBase):
         from matplotlib.path import Path as MplPath
 
         segments = []
+        segment_closed = []  # Track which segments should be closed
         current_segment = []
 
         if marker_codes is not None:
@@ -570,54 +667,141 @@ class RendererDxf(RendererBase):
                 if code == MplPath.MOVETO:
                     if current_segment:
                         segments.append(np.array(current_segment))
+                        segment_closed.append(False)  # Previous segment wasn't closed
                     current_segment = [vertex]
                 elif code == MplPath.LINETO:
                     current_segment.append(vertex)
                 elif code == MplPath.CLOSEPOLY:
                     if current_segment:
                         segments.append(np.array(current_segment))
+                        segment_closed.append(True)  # This segment is closed
                         current_segment = []
 
             if current_segment:
                 segments.append(np.array(current_segment))
+                segment_closed.append(False)
         else:
             for v in marker_vertices:
-                if np.isnan(v).any():
+                if not is_valid_coordinate(v):
                     if current_segment:
                         segments.append(np.array(current_segment))
+                        segment_closed.append(False)
                         current_segment = []
                 else:
                     current_segment.append(v)
 
             if current_segment:
                 segments.append(np.array(current_segment))
+                segment_closed.append(False)
 
         for vertex in vertices:
-            if np.isnan(vertex).any():
+            if not is_valid_coordinate(vertex):
                 continue
 
             dx, dy = vertex
 
-            for segment in segments:
+            for i, segment in enumerate(segments):
                 if len(segment) == 0:
                     continue
 
                 transformed_segment = marker_trans.transform(segment)
                 positioned_segment = transformed_segment + np.array([dx, dy])
 
+                # Validate all coordinates in the positioned segment
+                positioned_segment = filter_invalid_coordinates(positioned_segment)
+
                 if len(positioned_segment) >= 2:
-                    self.modelspace.add_lwpolyline(
-                        points=positioned_segment.tolist(),
-                        close=False,
+                    # Determine if this segment should be closed
+                    should_close = (
+                        segment_closed[i] if i < len(segment_closed) else False
+                    )
+
+                    # Also close if first and last points are very close
+                    if not should_close:
+                        dist = np.linalg.norm(
+                            positioned_segment[0] - positioned_segment[-1]
+                        )
+                        # For circular markers, be more lenient with closing threshold
+                        # Calculate approximate marker size
+                        if (
+                            len(positioned_segment) > 10
+                        ):  # Likely a circular marker with many points
+                            marker_extent = np.linalg.norm(
+                                np.max(positioned_segment, axis=0)
+                                - np.min(positioned_segment, axis=0)
+                            )
+                            # Close if distance is less than 10% of marker extent
+                            if dist < marker_extent * 0.1:
+                                should_close = True
+                        elif dist < 0.5:  # For simple shapes, use fixed threshold
+                            should_close = True
+
+                    polyline = self.modelspace.add_lwpolyline(
+                        points=positioned_segment,
+                        close=should_close,
                         dxfattribs=dxfattribs,
                     )
+
+                    # Add fill if marker has face color and shape is closed
+                    # Check alpha to avoid filling transparent markers
+                    face_alpha = (
+                        rgbFace[3] if rgbFace is not None and len(rgbFace) > 3 else 1.0
+                    )
+                    if should_close and rgbFace is not None and face_alpha > 0:
+                        hatch = self.modelspace.add_hatch(
+                            color=256, dxfattribs=dxfattribs
+                        )
+                        hatch.set_solid_fill()
+                        hatch.paths.add_polyline_path(
+                            polyline.get_points(format="xyb"),
+                            is_closed=True,
+                        )
+
                 elif len(positioned_segment) == 1:
-                    point = positioned_segment[0]
-                    self.modelspace.add_circle(
-                        center=point.tolist(),
-                        radius=1.0,
-                        dxfattribs=dxfattribs,
+                    # Single point - likely a circular marker
+                    # Calculate radius from marker transform scale
+                    scale_x = np.sqrt(
+                        marker_trans.get_matrix()[0, 0] ** 2
+                        + marker_trans.get_matrix()[1, 0] ** 2
                     )
+                    scale_y = np.sqrt(
+                        marker_trans.get_matrix()[0, 1] ** 2
+                        + marker_trans.get_matrix()[1, 1] ** 2
+                    )
+                    radius = (
+                        (scale_x + scale_y) / 2.0 * 0.5
+                    )  # Average scale as radius, scaled down
+
+                    # Use vertex position (dx, dy) as circle center instead of positioned_segment[0]
+                    # This ensures the circle is centered correctly on the data point
+                    center = [dx, dy]
+                    if is_valid_coordinate(center):
+                        circle = self.modelspace.add_circle(
+                            center=center,
+                            radius=radius,
+                            dxfattribs=dxfattribs,
+                        )
+
+                        # Add fill for circle if face color specified and not transparent
+                        face_alpha = (
+                            rgbFace[3]
+                            if rgbFace is not None and len(rgbFace) > 3
+                            else 1.0
+                        )
+                        if rgbFace is not None and face_alpha > 0:
+                            hatch = self.modelspace.add_hatch(
+                                color=256, dxfattribs=dxfattribs
+                            )
+                            hatch.set_solid_fill()
+                            # Create circular path for hatch
+                            hatch.paths.add_edge_path()
+                            edge_path = hatch.paths[-1]
+                            edge_path.add_arc(
+                                center=center,
+                                radius=radius,
+                                start_angle=0,
+                                end_angle=360,
+                            )
 
     def draw_text(self, gc, x, y, s, prop, angle, ismath=False, mtext=None):
         """Draw text with proper layer assignment"""
@@ -635,7 +819,7 @@ class RendererDxf(RendererBase):
             dxfattribs["color"] = rgb_to_dxf(gc.get_rgb())
 
         s = s.replace("\u2212", "-")
-        s.encode("ascii", "ignore").decode()
+        s = s.encode("ascii", "ignore").decode()
 
         if s and len(s) > 0 and s[0] == "$":
             pattern = r"\\mathbf\{(.*?)\}"
@@ -667,10 +851,15 @@ class RendererDxf(RendererBase):
             halign = self._map_align(mtext.get_ha(), vert=False)
             valign = self._map_align(mtext.get_va(), vert=True)
 
-        align = valign
-        if align:
-            align += "_"
-        align += halign
+        # Build alignment string properly (avoid empty valign causing "_LEFT" etc.)
+        if valign and valign != "":
+            align = valign + "_" + halign
+        else:
+            align = halign
+
+        # Ensure align is never empty (AutoCAD cannot handle empty/None alignment)
+        if not align or align == "" or align == "_":
+            align = "LEFT"
 
         alignment_map = {
             "TOP_LEFT": TextEntityAlignment.TOP_LEFT,
@@ -796,7 +985,98 @@ class FigureCanvasDxf(FigureCanvasBase):
         """
         renderer = self.get_dxf_renderer()
         self.figure.draw(renderer)
+
+        # After drawing, extract any geo pattern artists that weren't drawn
+        # These are custom pattern artists stored in axes._geo_pattern_artists
+        self._draw_geo_pattern_artists(renderer)
+
         return renderer.drawing
+
+    def _draw_geo_pattern_artists(self, renderer):
+        """Extract and draw geo pattern artists(circles, dots) for FM plots from axes"""
+        for ax in self.figure.axes:
+            if not hasattr(ax, "_geo_pattern_artists"):
+                continue
+
+            for layer_info in ax._geo_pattern_artists:
+                hatch_style = layer_info.get("hatch_style", "")
+                artists = layer_info.get("artists")
+
+                if not artists:
+                    continue
+
+                # Set up DXF attributes for geo pattern artists
+                # These go to FM-Graph layer (or layer 0 if not using FM layers)
+                dxfattribs = {}
+                if self.use_fm_layers:
+                    dxfattribs["layer"] = "FM-Graph"
+                    dxfattribs["color"] = 256  # ByLayer
+                else:
+                    dxfattribs["color"] = 7  # White/default
+
+                if hatch_style == "VERTICAL_CIRCLES":
+                    # artists is a PathCollection with all circles
+                    try:
+                        offsets = artists.get_offsets()
+                        sizes = artists.get_sizes()
+
+                        # Transform offsets to data coordinates
+                        offset_transform = artists.get_offset_transform()
+                        transformed_offsets = offset_transform.transform(offsets)
+
+                        # Calculate radius from size (matplotlib size is area in points^2)
+                        # radius = sqrt(size / pi) * (dpi / 72) to convert to drawing units
+                        import math
+
+                        if len(sizes) > 0:
+                            size = sizes[0]
+                            radius = math.sqrt(size / math.pi) * (renderer.dpi / 72.0)
+                        else:
+                            radius = 2.0  # Default radius
+
+                        for x, y in transformed_offsets:
+                            if is_valid_coordinate([x, y]):
+                                renderer.modelspace.add_circle(
+                                    center=(float(x), float(y)),
+                                    radius=radius,
+                                    dxfattribs=dxfattribs,
+                                )
+                    except Exception:
+                        pass
+
+                elif hatch_style == "VERTICAL_CIRCLES_WITH_DOTS":
+                    # artists is a list of (type, artist) tuples
+                    try:
+                        import math
+
+                        for element_type, artist in artists:
+                            offsets = artist.get_offsets()
+                            sizes = artist.get_sizes()
+
+                            # Transform offsets to data coordinates
+                            offset_transform = artist.get_offset_transform()
+                            transformed_offsets = offset_transform.transform(offsets)
+
+                            if element_type == "circle":
+                                # Calculate radius
+                                if len(sizes) > 0:
+                                    size = sizes[0]
+                                    radius = math.sqrt(size / math.pi) * (
+                                        renderer.dpi / 72.0
+                                    )
+                                else:
+                                    radius = 2.0
+
+                                for x, y in transformed_offsets:
+                                    if is_valid_coordinate([x, y]):
+                                        renderer.modelspace.add_circle(
+                                            center=(float(x), float(y)),
+                                            radius=radius,
+                                            dxfattribs=dxfattribs,
+                                        )
+
+                    except Exception:
+                        pass
 
     filetypes = FigureCanvasBase.filetypes.copy()
     filetypes["dxf"] = "DXF"

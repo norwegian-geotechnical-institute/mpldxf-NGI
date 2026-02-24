@@ -19,6 +19,7 @@ COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
+
 import os
 import shutil
 import tempfile
@@ -31,8 +32,7 @@ from numpy.random import random
 from mpldxf import backend_dxf
 
 
-matplotlib.backend_bases.register_backend('dxf',
-                                          backend_dxf.FigureCanvas)
+matplotlib.backend_bases.register_backend("dxf", backend_dxf.FigureCanvas)
 
 
 class DxfBackendTestCase(unittest.TestCase):
@@ -49,27 +49,27 @@ class DxfBackendTestCase(unittest.TestCase):
     def test_plot(self):
         """Test a simple line-plot command."""
         plt.plot(range(5), [4, 3, 2, 1, 0])
-        outfile = os.path.join(self.test_dir, 'test_plot.dxf')
+        outfile = os.path.join(self.test_dir, "test_plot.dxf")
         plt.savefig(outfile)
         self.assertTrue(os.path.isfile(outfile))
 
     def test_boxplot(self):
         """Test a box-plot."""
         plt.boxplot(random((4, 30)))
-        outfile = os.path.join(self.test_dir, 'test_boxplot.dxf')
+        outfile = os.path.join(self.test_dir, "test_boxplot.dxf")
         plt.savefig(outfile)
         self.assertTrue(os.path.isfile(outfile))
 
     def test_contour(self):
         """Test some contours."""
         plt.contour(random((30, 30)))
-        outfile = os.path.join(self.test_dir, 'test_contour.dxf')
+        outfile = os.path.join(self.test_dir, "test_contour.dxf")
         plt.savefig(outfile)
         self.assertTrue(os.path.isfile(outfile))
 
     def test_contourf(self):
         """Test some filled contours."""
         plt.contourf(random((30, 30)))
-        outfile = os.path.join(self.test_dir, 'test_contourf.dxf')
+        outfile = os.path.join(self.test_dir, "test_contourf.dxf")
         plt.savefig(outfile)
         self.assertTrue(os.path.isfile(outfile))

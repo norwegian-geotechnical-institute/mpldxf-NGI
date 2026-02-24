@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "mpldxf"
-version = "1.0.2"  
+version = "1.0.3"  
 description = "A fork of mpldxf - a matplotlib backend to write DXF drawings. Modified by NGI to handle geotechnical plots"
 authors = ["David Kent",
            "Jon-Michael Josefsen <jmj@ngi.no>",

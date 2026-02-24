@@ -1,8 +1,28 @@
 # Changes
 
+## Version 1.0.3
+
+_2026-02-24_
+
+Add:
+
+- Split up "FM-Grid" in "FM-Grid-Horizontal" and "FM-Grid-Vertical"
+- Add support for plotting FM Samples in dxf:
+  - Drawing different linetypes (dotted, dashed etc.)
+  - Adding better support for drawing datapoints symbolized by objects as circles, triangles, squares etc.
+
+Fix:
+
+- Unclosed hatch boundary-error
+- Duplicated hatch-error
+- Missing boundary reactor-error
+- Infinite number-error
+
 ## Version 1.0.2
 
 _2025-12-16_
+
+Fix:
 
 - Update FM-layers logic to better catch "FM-Grid"
 
@@ -10,7 +30,9 @@ _2025-12-16_
 
 _2025-12-15_
 
-- Add "FM-Grid" to the FM-layers
+Add:
+
+- "FM-Grid" to the FM-layers
 
 ## Version 1.0.0
 
