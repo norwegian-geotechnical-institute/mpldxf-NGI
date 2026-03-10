@@ -1,5 +1,14 @@
 # Changes
 
+## Version 1.0.4
+
+_2026-03-10_
+
+Change:
+
+- Remove filter of non-ascii characters in `RendererDxf.draw_text()`. 
+  Let this be up to the caller if any filtering is needed.
+
 ## Version 1.0.3
 
 _2026-02-24_

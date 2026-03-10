@@ -34,7 +34,6 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
 
-from __future__ import absolute_import, division, unicode_literals
 from io import BytesIO, StringIO
 import os
 import sys
@@ -49,8 +48,6 @@ from matplotlib.backend_bases import (
     FigureManagerBase,
 )
 from matplotlib.transforms import Affine2D
-import matplotlib.transforms as transforms
-import matplotlib.collections as mplc
 import numpy as np
 from shapely import Point
 from shapely.geometry import LineString, Polygon
@@ -817,9 +814,6 @@ class RendererDxf(RendererBase):
             dxfattribs["color"] = 256
         else:
             dxfattribs["color"] = rgb_to_dxf(gc.get_rgb())
-
-        s = s.replace("\u2212", "-")
-        s = s.encode("ascii", "ignore").decode()
 
         if s and len(s) > 0 and s[0] == "$":
             pattern = r"\\mathbf\{(.*?)\}"
