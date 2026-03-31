@@ -40,6 +40,9 @@ htmlcov/
 nosetests.xml
 coverage.xml
 
+# Generated test artifacts
+tests/artifacts/*
+
 # Translations
 *.mo
 
