@@ -41,7 +41,11 @@ nosetests.xml
 coverage.xml
 
 # Generated test artifacts
-tests/artifacts/*
+tests/artifacts/dxf/*
+tests/artifacts/png/*
+!tests/artifacts/.gitkeep
+!tests/artifacts/dxf/.gitkeep
+!tests/artifacts/png/.gitkeep
 
 # Translations
 *.mo

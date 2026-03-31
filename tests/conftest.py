@@ -11,6 +11,8 @@ import pytest
 from mpldxf import backend_dxf
 
 ARTIFACTS_DIR = Path(__file__).parent / "artifacts"
+DXF_ARTIFACTS_DIR = ARTIFACTS_DIR / "dxf"
+PNG_ARTIFACTS_DIR = ARTIFACTS_DIR / "png"
 
 
 def _register_backend(canvas_cls):
@@ -26,7 +28,8 @@ def close_figures():
 
 @pytest.fixture
 def export_dxf():
-    ARTIFACTS_DIR.mkdir(exist_ok=True)
+    DXF_ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+    PNG_ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 
     def _export(
         fig,
@@ -38,9 +41,9 @@ def export_dxf():
     ):
         _register_backend(canvas_cls)
         if save_preview:
-            fig.savefig(ARTIFACTS_DIR / f"{name}.png")
+            fig.savefig(PNG_ARTIFACTS_DIR / f"{name}.png")
 
-        output = ARTIFACTS_DIR / f"{name}.dxf"
+        output = DXF_ARTIFACTS_DIR / f"{name}.dxf"
         fig.savefig(output, transparent=transparent)
         return ezdxf.readfile(output)
 
