@@ -116,6 +116,38 @@ def test_marker_only_plot_exports_only_marker_geometry(export_dxf):
     assert entity_count(doc, "HATCH") == 3
 
 
+def test_dashed_line_exports_dxf_dash_attributes(export_dxf):
+    fig, ax = plt.subplots()
+    ax.patch.set_visible(False)
+    ax.plot([0, 1, 2], [0, 1, 0], linestyle="--")
+    ax.axis("off")
+
+    doc = export_dxf(fig, "dashed_line_plot", transparent=True)
+    polyline = entities_by_type(doc, "LWPOLYLINE")[0]
+
+    assert polyline.dxf.linetype == "DASHED2"
+    assert polyline.dxf.ltscale == 0.2
+
+
+def test_unfilled_marker_plot_exports_outline_without_hatch(export_dxf):
+    fig, ax = plt.subplots()
+    ax.patch.set_visible(False)
+    ax.plot(
+        [0, 1, 2],
+        [1, 2, 1],
+        linestyle="None",
+        marker="o",
+        markerfacecolor="none",
+    )
+    ax.axis("off")
+
+    doc = export_dxf(fig, "unfilled_marker_plot", transparent=True)
+
+    assert entity_types(doc) == {"CIRCLE"}
+    assert entity_count(doc, "CIRCLE") == 3
+    assert entity_count(doc, "HATCH") == 0
+
+
 def test_marker_plot_exports_filled_marker_geometry(export_dxf):
     fig, ax = plt.subplots()
     ax.patch.set_visible(False)
@@ -257,6 +289,40 @@ def test_fm_canvas_routes_tick_labels_to_value_and_depth_layers(export_dxf):
     assert texts["0.0"] == "FM-Depth"
     assert entity_count(doc, "TEXT") > 0
     assert len(entities_by_type(doc, "TEXT")) >= 3
+
+
+def test_fm_gridlines_currently_export_on_graph_layer(export_dxf):
+    fig, ax = plt.subplots()
+    ax.plot([0, 1, 2], [0, 1, 0])
+    ax.grid(True)
+
+    doc = export_dxf(
+        fig,
+        "fm_gridlines_current_layering",
+        canvas_cls=backend_dxf.FigureCanvasDxfFM,
+    )
+
+    layers = [entity.dxf.layer for entity in entities_by_type(doc, "LWPOLYLINE")]
+
+    assert "FM-Graph" in layers
+
+
+@pytest.mark.xfail(reason="Gridlines are not yet routed to FM-Grid-Horizontal/FM-Grid-Vertical")
+def test_fm_gridlines_should_export_to_dedicated_grid_layers(export_dxf):
+    fig, ax = plt.subplots()
+    ax.plot([0, 1, 2], [0, 1, 0])
+    ax.grid(True)
+
+    doc = export_dxf(
+        fig,
+        "fm_gridlines_expected_layering",
+        canvas_cls=backend_dxf.FigureCanvasDxfFM,
+    )
+
+    layers = {entity.dxf.layer for entity in entities_by_type(doc, "LWPOLYLINE")}
+
+    assert "FM-Grid-Horizontal" in layers
+    assert "FM-Grid-Vertical" in layers
 
 
 def test_text_alignment_exports_right_top_anchor(export_dxf):
