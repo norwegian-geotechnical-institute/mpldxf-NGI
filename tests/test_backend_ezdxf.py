@@ -103,6 +103,19 @@ def test_single_point_plot_exports_marker_entities(export_dxf):
     assert entity_count(doc, "HATCH") == 1
 
 
+def test_marker_only_plot_exports_only_marker_geometry(export_dxf):
+    fig, ax = plt.subplots()
+    ax.patch.set_visible(False)
+    ax.plot([0, 1, 2], [1, 2, 1], linestyle="None", marker="o")
+    ax.axis("off")
+
+    doc = export_dxf(fig, "marker_only_plot", transparent=True)
+
+    assert entity_types(doc) == {"CIRCLE", "HATCH"}
+    assert entity_count(doc, "CIRCLE") == 3
+    assert entity_count(doc, "HATCH") == 3
+
+
 def test_marker_plot_exports_filled_marker_geometry(export_dxf):
     fig, ax = plt.subplots()
     ax.patch.set_visible(False)
