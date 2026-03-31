@@ -51,9 +51,33 @@ def modelspace_entities(doc):
     return list(doc.modelspace())
 
 
+def entities_by_type(doc, dxftype):
+    return [entity for entity in modelspace_entities(doc) if entity.dxftype() == dxftype]
+
+
+def entity_count(doc, dxftype):
+    return len(entities_by_type(doc, dxftype))
+
+
 def entity_types(doc):
     return {entity.dxftype() for entity in modelspace_entities(doc)}
 
 
 def layer_names(doc):
     return {layer.dxf.name for layer in doc.layers}
+
+
+def entity_layers(doc):
+    return {entity.dxf.layer for entity in modelspace_entities(doc)}
+
+
+def text_values(doc):
+    return [entity.dxf.text for entity in entities_by_type(doc, "TEXT")]
+
+
+def text_layers(doc):
+    return {entity.dxf.text: entity.dxf.layer for entity in entities_by_type(doc, "TEXT")}
+
+
+def block_names(doc):
+    return {block.name for block in doc.blocks}
