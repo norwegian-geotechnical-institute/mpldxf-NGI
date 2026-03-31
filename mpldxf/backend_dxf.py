@@ -40,6 +40,7 @@ import os
 import sys
 import math
 import re
+import warnings
 
 import matplotlib
 from matplotlib.backend_bases import (
@@ -129,6 +130,42 @@ class RendererDxf(RendererBase):
 
         self.drawing = drawing
         self.modelspace = modelspace
+        self.current_write_target = modelspace
+        self._write_target_stack = []
+        self._next_axes_index = 0
+        self._axes_block_names = {}
+        self._axes_block_refs = set()
+
+    def init_main_plot_block(self):
+        if self.current_write_target is self.modelspace:
+            block_name = "MAIN_PLOT"
+            self.drawing.blocks.new(name=block_name)
+            # Keep modelspace to a single top-level insert so the whole figure can
+            # be reused as one block in downstream CAD workflows.
+            self.modelspace.add_blockref(block_name, (0, 0))
+            self.current_write_target = self.drawing.blocks[block_name]
+
+    def _get_block_name_for_axes(self, ax):
+        # get subplot block name according to axis bounds
+        # if subplot does not exist yet, create it
+
+        bounds = tuple(round(value, 6) for value in ax.get_position().bounds)
+        if bounds not in self._axes_block_names:
+            block_name = "SUBPLOT_%d" % (len(self._axes_block_names) + 1)
+            self.drawing.blocks.new(name=block_name)
+            # Twin/shared axes reuse the same subplot block because they occupy
+            # the same figure position.
+            self._axes_block_names[bounds] = block_name
+        return self._axes_block_names[bounds]
+
+    def block_for_axes(self, ax):
+        return self.drawing.blocks[self._get_block_name_for_axes(ax)]
+
+    def _get_next_axes_for_group(self):
+        if not hasattr(self, "figure"):
+            return None
+        
+        return self.figure.axes[self._next_axes_index]
 
     def _create_fm_layers(self, drawing):
         """Create FM-specific layers with specific colors"""
@@ -150,11 +187,22 @@ class RendererDxf(RendererBase):
 
     def clear(self):
         """Reset the renderer."""
-        super(RendererDxf, self).clear()
         self._init_drawing()
 
     def open_group(self, s, gid=None):
         """Open a grouping element with label *s*."""
+        if s == "axes" and hasattr(self, "figure"):
+            self._write_target_stack.append(self.current_write_target)
+            ax = self._get_next_axes_for_group()
+            if ax is not None:
+                block_name = self._get_block_name_for_axes(ax)
+                if block_name not in self._axes_block_refs:
+                    # Insert each subplot block once into the current plot block,
+                    # then draw the axes contents into that block definition.
+                    self.current_write_target.add_blockref(block_name, (0, 0))
+                    self._axes_block_refs.add(block_name)
+                self.current_write_target = self.drawing.blocks[block_name]
+            self._next_axes_index += 1
         self._groupd.append(s)
         if gid:
             self._group_gids[s] = gid  # Store gid per group name
@@ -165,6 +213,8 @@ class RendererDxf(RendererBase):
             self._groupd.pop()
             # Remove gid for this group
             self._group_gids.pop(s, None)
+        if s == "axes" and self._write_target_stack:
+            self.current_write_target = self._write_target_stack.pop()
 
     def _determine_element_layer(self):
         """Determine which layer to use based on matplotlib element context"""
@@ -381,7 +431,7 @@ class RendererDxf(RendererBase):
                     # Validate coordinates before adding to DXF
                     vertices = filter_invalid_coordinates(vertices)
                     if len(vertices) > 0 and vertices[0][0] != 0:
-                        entity = self.modelspace.add_lwpolyline(
+                        entity = self.current_write_target.add_lwpolyline(
                             points=vertices, close=False, dxfattribs=dxfattribs
                         )
                     else:
@@ -393,7 +443,7 @@ class RendererDxf(RendererBase):
                     ]
                     vertices = [v for v in vertices if len(v) > 0]
                     entity = [
-                        self.modelspace.add_lwpolyline(
+                        self.current_write_target.add_lwpolyline(
                             points=points, close=False, dxfattribs=dxfattribs
                         )
                         for points in vertices
@@ -430,14 +480,14 @@ class RendererDxf(RendererBase):
         if rgbFace is not None:
             if type(poly) == list:
                 for pol in poly:
-                    hatch = self.modelspace.add_hatch(color=256, dxfattribs=dxfattribs)
+                    hatch = self.current_write_target.add_hatch(color=256, dxfattribs=dxfattribs)
                     hatch.set_solid_fill()
                     hatch.paths.add_polyline_path(
                         pol.get_points(format="xyb"),
                         is_closed=pol.closed,
                     )
             else:
-                hatch = self.modelspace.add_hatch(color=256, dxfattribs=dxfattribs)
+                hatch = self.current_write_target.add_hatch(color=256, dxfattribs=dxfattribs)
                 hatch.set_solid_fill()
                 hatch.paths.add_polyline_path(
                     poly.get_points(format="xyb"),
@@ -510,12 +560,12 @@ class RendererDxf(RendererBase):
                             if self.use_fm_layers:
                                 attrs["layer"] = layer_name
                                 attrs["color"] = 256
-                            self.modelspace.add_lwpolyline(
+                            self.current_write_target.add_lwpolyline(
                                 points=clipped, dxfattribs=attrs
                             )
                         else:
                             hatch_attrs = dxfattribs.copy()
-                            hatch = self.modelspace.add_hatch(
+                            hatch = self.current_write_target.add_hatch(
                                 color=256, dxfattribs=hatch_attrs
                             )
                             hatch.set_solid_fill()
@@ -736,7 +786,7 @@ class RendererDxf(RendererBase):
                         elif dist < 0.5:  # For simple shapes, use fixed threshold
                             should_close = True
 
-                    polyline = self.modelspace.add_lwpolyline(
+                    polyline = self.current_write_target.add_lwpolyline(
                         points=positioned_segment,
                         close=should_close,
                         dxfattribs=dxfattribs,
@@ -748,7 +798,7 @@ class RendererDxf(RendererBase):
                         rgbFace[3] if rgbFace is not None and len(rgbFace) > 3 else 1.0
                     )
                     if should_close and rgbFace is not None and face_alpha > 0:
-                        hatch = self.modelspace.add_hatch(
+                        hatch = self.current_write_target.add_hatch(
                             color=256, dxfattribs=dxfattribs
                         )
                         hatch.set_solid_fill()
@@ -776,7 +826,7 @@ class RendererDxf(RendererBase):
                     # This ensures the circle is centered correctly on the data point
                     center = [dx, dy]
                     if is_valid_coordinate(center):
-                        circle = self.modelspace.add_circle(
+                        circle = self.current_write_target.add_circle(
                             center=center,
                             radius=radius,
                             dxfattribs=dxfattribs,
@@ -789,7 +839,7 @@ class RendererDxf(RendererBase):
                             else 1.0
                         )
                         if rgbFace is not None and face_alpha > 0:
-                            hatch = self.modelspace.add_hatch(
+                            hatch = self.current_write_target.add_hatch(
                                 color=256, dxfattribs=dxfattribs
                             )
                             hatch.set_solid_fill()
@@ -826,14 +876,14 @@ class RendererDxf(RendererBase):
             stripped_text = re.sub(pattern, r"\1", s)
             stripped_text = re.sub(r"[$]", "", stripped_text)
             stripped_text = re.sub(r"\\/", " ", stripped_text)
-            text = self.modelspace.add_text(
+            text = self.current_write_target.add_text(
                 stripped_text,
                 height=fontsize,
                 rotation=angle,
                 dxfattribs=dxfattribs,
             )
         else:
-            text = self.modelspace.add_text(
+            text = self.current_write_target.add_text(
                 s,
                 height=fontsize,
                 rotation=angle,
@@ -984,6 +1034,9 @@ class FigureCanvasDxf(FigureCanvasBase):
         Draw the figure using the renderer
         """
         renderer = self.get_dxf_renderer()
+        renderer.clear()
+        renderer.figure = self.figure
+        renderer.init_main_plot_block()
         self.figure.draw(renderer)
 
         # After drawing, extract any geo pattern artists that weren't drawn
@@ -995,6 +1048,7 @@ class FigureCanvasDxf(FigureCanvasBase):
     def _draw_geo_pattern_artists(self, renderer):
         """Extract and draw geo pattern artists(circles, dots) for FM plots from axes"""
         for ax in self.figure.axes:
+            layout = renderer.block_for_axes(ax)
             if not hasattr(ax, "_geo_pattern_artists"):
                 continue
 
@@ -1036,7 +1090,7 @@ class FigureCanvasDxf(FigureCanvasBase):
 
                         for x, y in transformed_offsets:
                             if is_valid_coordinate([x, y]):
-                                renderer.modelspace.add_circle(
+                                layout.add_circle(
                                     center=(float(x), float(y)),
                                     radius=radius,
                                     dxfattribs=dxfattribs,
@@ -1069,7 +1123,7 @@ class FigureCanvasDxf(FigureCanvasBase):
 
                                 for x, y in transformed_offsets:
                                     if is_valid_coordinate([x, y]):
-                                        renderer.modelspace.add_circle(
+                                        layout.add_circle(
                                             center=(float(x), float(y)),
                                             radius=radius,
                                             dxfattribs=dxfattribs,

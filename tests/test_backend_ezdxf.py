@@ -34,6 +34,14 @@ matplotlib.backend_bases.register_backend("dxf", backend_dxf.FigureCanvas)
 matplotlib.use("Agg")
 
 
+def drawn_entities(doc):
+    block_entities = []
+    for block in doc.blocks:
+        if block.name.startswith("SUBPLOT_"):
+            block_entities.extend(list(block))
+    return block_entities or list(doc.modelspace())
+
+
 class TestDxfBackendCase(unittest.TestCase):
     """Tests for the dxf backend."""
 
@@ -52,8 +60,7 @@ class TestDxfBackendCase(unittest.TestCase):
 
         # Load the DXF file and inspect its content
         doc = ezdxf.readfile(outfile)
-        modelspace = doc.modelspace()
-        entities = list(modelspace)
+        entities = drawn_entities(doc)
         assert len(entities) == 1  # 1 line and the bounding box of the plot
 
     def test_plot_line(self):
@@ -70,8 +77,7 @@ class TestDxfBackendCase(unittest.TestCase):
 
         # Load the DXF file and inspect its content
         doc = ezdxf.readfile(outfile)
-        modelspace = doc.modelspace()
-        entities = list(modelspace)
+        entities = drawn_entities(doc)
         entity_types = set([entity.dxftype() for entity in entities])
         assert entity_types == {"LWPOLYLINE", "TEXT"}
 
@@ -91,8 +97,7 @@ class TestDxfBackendCase(unittest.TestCase):
 
         # Load the DXF file and inspect its content
         doc = ezdxf.readfile(outfile)
-        modelspace = doc.modelspace()
-        entities = list(modelspace)
+        entities = drawn_entities(doc)
         entity_types = set([entity.dxftype() for entity in entities])
         assert entity_types == {"LWPOLYLINE", "TEXT"}
 
@@ -118,8 +123,7 @@ class TestDxfBackendCase(unittest.TestCase):
 
         # Load the DXF file and inspect its content
         doc = ezdxf.readfile(outfile)
-        modelspace = doc.modelspace()
-        entities = list(modelspace)
+        entities = drawn_entities(doc)
         entity_types = set([entity.dxftype() for entity in entities])
         assert entity_types == {"LWPOLYLINE", "TEXT"}
 
@@ -191,11 +195,52 @@ class TestDxfBackendCase(unittest.TestCase):
 
         # Load the DXF file and inspect its content
         doc = ezdxf.readfile(outfile)
-        modelspace = doc.modelspace()
-        entities = list(modelspace)
+        entities = drawn_entities(doc)
         assert (
             len(entities) == 1
         )  # ideally we should have two lines (i.e. one broken line), but one interpolated line works as a hotfix
+
+    def test_subplots_are_written_to_nested_blocks(self):
+        fig, axs = plt.subplots(1, 2)
+        axs[0].plot([0, 1], [0, 1])
+        axs[1].plot([0, 1], [1, 0])
+
+        try:
+            outfile = "tests/files/test_subplots_blocks.dxf"
+            plt.savefig(outfile, transparent=True)
+        finally:
+            plt.close()
+
+        doc = ezdxf.readfile(outfile)
+        plot_blocks = [block for block in doc.blocks if block.name == "MAIN_PLOT"]
+        subplot_blocks = [block for block in doc.blocks if block.name.startswith("SUBPLOT_")]
+
+        assert len(plot_blocks) == 1
+        assert len(subplot_blocks) == 2
+        assert len(list(doc.modelspace().query("INSERT"))) == 1
+        assert len(list(plot_blocks[0].query("INSERT"))) == 2
+
+    def test_extra_axes_group_warns_and_keeps_target(self):
+        fig, ax = plt.subplots()
+        renderer = backend_dxf.RendererDxf(
+            fig.bbox.bounds[2],
+            fig.bbox.bounds[3],
+            fig.dpi,
+            backend_dxf.FigureCanvasDxf.DXFVERSION,
+        )
+        renderer.figure = fig
+        renderer.init_main_plot_block()
+
+        renderer.open_group("axes")
+        renderer.close_group("axes")
+
+        original_target = renderer.current_write_target
+        with self.assertWarnsRegex(RuntimeWarning, "more 'axes' draw groups"):
+            renderer.open_group("axes")
+        assert renderer.current_write_target is original_target
+        renderer.close_group("axes")
+        assert renderer.current_write_target is original_target
+        plt.close(fig)
 
     def test_plot_with_data_with_FM_layers(self):
         matplotlib.backend_bases.register_backend("dxf", backend_dxf.FigureCanvasDxfFM)
