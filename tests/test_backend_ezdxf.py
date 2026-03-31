@@ -11,6 +11,7 @@ from conftest import (
     entity_types,
     layer_names,
     modelspace_entities,
+    text_entity,
     text_layers,
 )
 
@@ -245,6 +246,51 @@ def test_fm_canvas_routes_tick_labels_to_value_and_depth_layers(export_dxf):
     assert len(entities_by_type(doc, "TEXT")) >= 3
 
 
+def test_text_alignment_exports_right_top_anchor(export_dxf):
+    fig, ax = plt.subplots()
+    ax.text(0.2, 0.3, "RightTop", ha="right", va="top", transform=ax.transAxes)
+
+    doc = export_dxf(fig, "text_alignment_right_top")
+    text = text_entity(doc, "RightTop")
+
+    assert text.dxf.rotation == 0
+    assert text.dxf.halign == 2
+    assert text.dxf.valign == 3
+    assert tuple(text.dxf.insert) == tuple(text.dxf.align_point)
+
+
+def test_rotated_ylabel_exports_vertical_text_alignment(export_dxf):
+    fig, ax = plt.subplots()
+    ax.set_ylabel("Rotated Label")
+
+    doc = export_dxf(fig, "rotated_ylabel")
+    text = text_entity(doc, "Rotated Label")
+
+    assert text.dxf.rotation == 90.0
+    assert text.dxf.halign == 1
+    assert text.dxf.valign == 1
+
+
+def test_text_rotation_preserves_center_middle_alignment(export_dxf):
+    fig, ax = plt.subplots()
+    ax.text(
+        0.5,
+        0.5,
+        "CenterMiddle",
+        ha="center",
+        va="center",
+        rotation=30,
+        transform=ax.transAxes,
+    )
+
+    doc = export_dxf(fig, "text_rotation_center_middle")
+    text = text_entity(doc, "CenterMiddle")
+
+    assert text.dxf.rotation == 30.0
+    assert text.dxf.halign == 1
+    assert text.dxf.valign == 2
+
+
 def test_geo_pattern_vertical_circles_adds_circle_entities(export_dxf):
     fig, ax = plt.subplots()
     artist = ax.scatter([1, 2, 3], [2, 3, 4], s=[36, 36, 36])
@@ -281,4 +327,3 @@ def test_geo_pattern_vertical_circles_with_dots_exports_only_circle_entries(expo
 
     assert entity_count(doc, "CIRCLE") == 2
     assert "FM-Graph" in entity_layers(doc)
-

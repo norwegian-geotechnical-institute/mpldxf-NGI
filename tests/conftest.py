@@ -81,3 +81,10 @@ def text_layers(doc):
 
 def block_names(doc):
     return {block.name for block in doc.blocks}
+
+
+def text_entity(doc, text):
+    for entity in entities_by_type(doc, "TEXT"):
+        if entity.dxf.text == text:
+            return entity
+    raise AssertionError(f"Could not find TEXT entity with content {text!r}")
