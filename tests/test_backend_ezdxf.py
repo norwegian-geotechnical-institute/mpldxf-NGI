@@ -291,6 +291,23 @@ def test_fm_canvas_routes_tick_labels_to_value_and_depth_layers(export_dxf):
     assert len(entities_by_type(doc, "TEXT")) >= 3
 
 
+def test_fm_gid_override_routes_artist_to_method_layer(export_dxf):
+    fig, ax = plt.subplots()
+    line, = ax.plot([0, 1, 2], [0, 1, 0])
+    line.set_gid("FM-Method")
+
+    doc = export_dxf(
+        fig,
+        "fm_gid_override_method_layer",
+        canvas_cls=backend_dxf.FigureCanvasDxfFM,
+        transparent=True,
+    )
+
+    layers = [entity.dxf.layer for entity in entities_by_type(doc, "LWPOLYLINE")]
+
+    assert "FM-Method" in layers
+
+
 def test_fm_gridlines_currently_export_on_graph_layer(export_dxf):
     fig, ax = plt.subplots()
     ax.plot([0, 1, 2], [0, 1, 0])
@@ -368,6 +385,16 @@ def test_text_rotation_preserves_center_middle_alignment(export_dxf):
     assert text.dxf.rotation == 30.0
     assert text.dxf.halign == 1
     assert text.dxf.valign == 2
+
+
+def test_mathtext_is_sanitized_for_dxf_text_export(export_dxf):
+    fig, ax = plt.subplots()
+    ax.text(0.5, 0.5, r"$\mathbf{N}\/60$", transform=ax.transAxes)
+
+    doc = export_dxf(fig, "mathtext_sanitized")
+    text = text_entity(doc, "N 60")
+
+    assert text.dxf.text == "N 60"
 
 
 def test_geo_pattern_vertical_circles_adds_circle_entities(export_dxf):
