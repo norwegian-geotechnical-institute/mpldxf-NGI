@@ -16,8 +16,6 @@ Based on matplotlib.backends.backend_template.py.
 """
 
 from io import StringIO
-import os
-import sys
 import math
 
 import matplotlib
