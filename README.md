@@ -11,6 +11,9 @@ This package builds on the `ezdxf` package by Manfred Moitzi:
 
 The package can be cloned and installed using poetry:
 
+```bash
+poetry install
+```
 
 ## Usage
 
