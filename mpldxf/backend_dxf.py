@@ -58,14 +58,6 @@ from ezdxf.math.clipping import ClippingRect2d
 from .color_utils import rgb_to_dxf
 from .geometry_utils import filter_invalid_coordinates, is_valid_coordinate
 
-# When packaged with py2exe ezdxf has issues finding its templates
-# We tell it where to find them using this.
-# Note we also need to make sure they get packaged by adding them to the
-# configuration in setup.py
-if hasattr(sys, "frozen"):
-    ezdxf.options.template_dir = os.path.dirname(sys.executable)
-
-
 class RendererDxf(RendererBase):
     """
     The renderer handles drawing/rendering operations.
