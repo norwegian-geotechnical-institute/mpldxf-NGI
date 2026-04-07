@@ -37,6 +37,11 @@ from ezdxf.enums import TextEntityAlignment
 from ezdxf.math.clipping import ClippingRect2d
 
 from .color_utils import rgb_to_dxf
+from .fm_layers import (
+    create_fm_layers,
+    determine_element_layer,
+    determine_text_layer,
+)
 from .geometry_utils import filter_invalid_coordinates, is_valid_coordinate
 
 class RendererDxf(RendererBase):
@@ -65,28 +70,10 @@ class RendererDxf(RendererBase):
         drawing.header["$EXTMAX"] = (self.width, self.height, 0)
 
         if self.use_fm_layers:
-            self._create_fm_layers(drawing)
+            create_fm_layers(drawing)
 
         self.drawing = drawing
         self.modelspace = modelspace
-
-    def _create_fm_layers(self, drawing):
-        """Create FM-specific layers with specific colors"""
-        fm_layers = {
-            "FM-Frame": 3,  # Green - frames, ticks, gridlines
-            "FM-Graph": 4,  # Cyan - data graphs/lines
-            "FM-Location": 6,  # Magenta - location name text
-            "FM-Method": 5,  # Blue - method icons and names
-            "FM-Depth": 1,  # Red - Y-axis values (depth/elevation)
-            "FM-Value": 8,  # Grey - X-axis values
-            "FM-Text": 2,  # Yellow - axis labels and other text
-            "FM-Grid-Vertical": 7,  # Light Blue - vertical grid lines
-            "FM-Grid-Horizontal": 7,  # Light Blue - horizontal grid lines
-        }
-
-        for layer_name, color in fm_layers.items():
-            layer = drawing.layers.add(layer_name)
-            layer.dxf.color = color
 
     def clear(self):
         """Reset the renderer."""
@@ -107,101 +94,24 @@ class RendererDxf(RendererBase):
             self._group_gids.pop(s, None)
 
     def _determine_element_layer(self):
-        """Determine which layer to use based on matplotlib element context"""
+        """Determine which layer to use based on matplotlib element context."""
         if not self.use_fm_layers:
             return "0"
-
-        # Check if ANY active group has gid for FM layers
-        for group_name in self._groupd:
-            if self._group_gids.get(group_name) == "FM-Method":
-                return "FM-Method"
-            if self._group_gids.get(group_name) == "FM-Grid-Vertical":
-                return "FM-Grid-Vertical"
-            if self._group_gids.get(group_name) == "FM-Grid-Horizontal":
-                return "FM-Grid-Horizontal"
-            if self._group_gids.get(group_name) == "FM-Frame":
-                return "FM-Frame"
-
-        if not self._groupd:
-            return "0"
-
-        context_str = " ".join(self._groupd).lower()
-        current_element = self._groupd[-1].lower()
-
-        # Patches - defer to size analysis
-        if current_element == "patch":
-            return "PENDING"
-
-        # Line2D elements - data
-        elif current_element == "line2d":
-            return "FM-Graph"
-
-        # Collections - check what type
-        # Collections - check what type
-        elif current_element == "collection":
-            return "FM-Graph"
-
-        # Method collection marker added by draw_path_collection for fills
-        elif current_element == "method_collection":
-            return "FM-Graph"
-
-        # Text elements
-        elif current_element == "text":
-            return "FM-Text"
-
-        return "0"
+        return determine_element_layer(
+            self._groupd,
+            self._group_gids,
+        )
 
     def _determine_text_layer(self, text_content, fontsize):
-        """Determine text layer based on matplotlib context and content"""
+        """Determine text layer based on matplotlib context and content."""
         if not self.use_fm_layers:
             return "0"
-
-        # Check if ANY active group has method_symbol gid
-        for group_name in self._groupd:
-            if self._group_gids.get(group_name) == "FM-Method":
-                return "FM-Method"
-
-        context_str = " ".join(self._groupd).lower() if self._groupd else ""
-
-        # Y-axis elements -> Depth
-        if any(keyword in context_str for keyword in ["yaxis", "ytick"]):
-            return "FM-Depth"
-
-        # X-axis elements -> Value
-        if any(keyword in context_str for keyword in ["xaxis", "xtick"]):
-            return "FM-Value"
-
-        # Legend elements -> Text
-        if "legend" in context_str:
-            return "FM-Text"
-
-        # Title elements and large text -> Location
-        if "title" in context_str:
-            if fontsize > 8:
-                return "FM-Location"
-            else:
-                return "FM-Method"
-
-        # Text in general axes context - check position and content
-        if "axes" in context_str:
-            if len(self._groupd) == 3:  # ['figure', 'axes', 'text']
-                if fontsize > 8:
-                    return "FM-Location"
-                else:
-                    return "FM-Text"
-
-        # Axis labels -> Text
-        if any(keyword in context_str for keyword in ["xlabel", "ylabel"]):
-            return "FM-Text"
-
-        # Numeric patterns
-        if re.match(r"^\s*[-+]?\d*\.?\d+\s*$", text_content):
-            if "y" in context_str or "ytick" in context_str:
-                return "FM-Depth"
-            elif "x" in context_str or "xtick" in context_str:
-                return "FM-Value"
-
-        return "FM-Text"
+        return determine_text_layer(
+            self._groupd,
+            self._group_gids,
+            text_content,
+            fontsize,
+        )
 
     def _analyze_patch_size(self, vertices, gc):
         """Simple shape-based classification of patches"""
