@@ -34,8 +34,7 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
 
-from __future__ import absolute_import, division, unicode_literals
-from io import BytesIO, StringIO
+from io import StringIO
 import os
 import sys
 import math
@@ -49,14 +48,12 @@ from matplotlib.backend_bases import (
     FigureManagerBase,
 )
 from matplotlib.transforms import Affine2D
-import matplotlib.transforms as transforms
-import matplotlib.collections as mplc
 import numpy as np
 from shapely import Point
 from shapely.geometry import LineString, Polygon
 import ezdxf
 from ezdxf.enums import TextEntityAlignment
-from ezdxf.math.clipping import Clipping, ClippingRect2d, ConvexClippingPolygon2d
+from ezdxf.math.clipping import ClippingRect2d
 
 from . import dxf_colors
 
@@ -106,7 +103,7 @@ class RendererDxf(RendererBase):
     """
 
     def __init__(self, width, height, dpi, dxfversion, use_fm_layers=False):
-        RendererBase.__init__(self)
+        super().__init__()
         self.height = height
         self.width = width
         self.dpi = dpi
@@ -150,7 +147,7 @@ class RendererDxf(RendererBase):
 
     def clear(self):
         """Reset the renderer."""
-        super(RendererDxf, self).clear()
+        super().clear()
         self._init_drawing()
 
     def open_group(self, s, gid=None):
@@ -271,8 +268,6 @@ class RendererDxf(RendererBase):
         max_x, max_y = np.max(verts, axis=0)
         width = max_x - min_x
         height = max_y - min_y
-        area = width * height
-
         # Check if patch has hatching
         has_hatch = gc.get_hatch() is not None
         if has_hatch:
@@ -401,7 +396,7 @@ class RendererDxf(RendererBase):
             return entity
 
     def _draw_mpl_line2d(self, gc, path, transform):
-        line = self._draw_mpl_lwpoly(gc, path, transform, obj="line2d")
+        self._draw_mpl_lwpoly(gc, path, transform, obj="line2d")
 
     def _draw_mpl_patch(self, gc, path, transform, rgbFace=None):
         """Draw a matplotlib patch object"""
@@ -428,7 +423,7 @@ class RendererDxf(RendererBase):
 
         # Fill the patch if needed
         if rgbFace is not None:
-            if type(poly) == list:
+            if isinstance(poly, list):
                 for pol in poly:
                     hatch = self.modelspace.add_hatch(color=256, dxfattribs=dxfattribs)
                     hatch.set_solid_fill()
@@ -519,9 +514,7 @@ class RendererDxf(RendererBase):
                                 color=256, dxfattribs=hatch_attrs
                             )
                             hatch.set_solid_fill()
-                            line = hatch.paths.add_polyline_path(
-                                clipped, is_closed=True
-                            )
+                            hatch.paths.add_polyline_path(clipped, is_closed=True)
 
     def draw_path_collection(
         self,
@@ -563,8 +556,6 @@ class RendererDxf(RendererBase):
                 for offset_idx, offset in enumerate(transformed_offsets):
                     # Build the combined transform
                     # Start with master transform and add translation for offset
-                    from matplotlib.transforms import Affine2D
-
                     combined_transform = master_transform + Affine2D().translate(
                         offset[0], offset[1]
                     )
@@ -776,7 +767,7 @@ class RendererDxf(RendererBase):
                     # This ensures the circle is centered correctly on the data point
                     center = [dx, dy]
                     if is_valid_coordinate(center):
-                        circle = self.modelspace.add_circle(
+                        self.modelspace.add_circle(
                             center=center,
                             radius=radius,
                             dxfattribs=dxfattribs,
