@@ -1,7 +1,17 @@
 # Changes
 
+## Version 1.0.5 
 
-## Version 1.0.3
+_2026-04-07_
+
+Tidy:
+- move code from `backend_dxf.py` into other/new files:
+  - `rgb_to_dxf(rgb_val)` into `color_utils.py`
+  - fm layer logic into `fm_layers`
+  - `filter_invalid_coordinates(vertices)` and `is_valid_coordinate(coord)` into `geometry_utils.py`
+  - text drawing logic into `text_drawing.py`
+
+## Version 1.0.4
 
 _2026-03-31_
 
