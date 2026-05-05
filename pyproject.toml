@@ -1,26 +1,45 @@
-[tool.poetry]
+[project]
 name = "mpldxf"
-version = "1.0.3"  
+version = "1.0.6"
 description = "A fork of mpldxf - a matplotlib backend to write DXF drawings. Modified by NGI to handle geotechnical plots"
-authors = ["David Kent",
-           "Jon-Michael Josefsen <jmj@ngi.no>",
-           "Ingeborg Gjerde <ingeborg.gjerde@ngi.no>"]
-license = "MIT"
+authors = [
+    { name = "David Kent" },
+    { name = "Jon-Michael Josefsen", email = "jmj@ngi.no" },
+    { name = "Ingeborg Gjerde", email = "ingeborg.gjerde@ngi.no" },
+]
+requires-python = ">=3.12,<4"
 readme = "README.md"
-homepage = "https://github.com/norwegian-geotechnical-institute/mpldxf-NGI"
-repository = "https://github.com/norwegian-geotechnical-institute/mpldxf-NGI"
-keywords = ["matplotlib", "DXF", "CAD"]
+license = "MIT"
+keywords = [
+    "matplotlib",
+    "DXF",
+    "CAD",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+dependencies = [
+    "ezdxf>=1.3,<2",
+    "matplotlib>=3.9.2,<4",
+    "shapely>=2.0.6,<3",
+    "svgpathtools>=1.6.1,<2",
+]
 
-[tool.poetry.dependencies]
-python = "^3.12" 
-ezdxf = "^1.3"
-matplotlib = "^3.9.2"
-shapely = "^2.0.6"
-svgpathtools = "^1.6.1"
+[project.urls]
+Homepage = "https://github.com/norwegian-geotechnical-institute/mpldxf-NGI"
+Repository = "https://github.com/norwegian-geotechnical-institute/mpldxf-NGI"
 
-[tool.poetry.dev-dependencies]
-pytest = "^7.0" 
+[dependency-groups]
+dev = ["pytest>=7.0,<8"]
+
+[tool.uv]
+
+[tool.uv.build-backend]
+module-root = ""
 
 [build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["uv_build>=0.11.8,<0.12.0"]
+build-backend = "uv_build"

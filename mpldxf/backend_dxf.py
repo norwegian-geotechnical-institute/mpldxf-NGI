@@ -13,34 +13,11 @@ or register:
   matplotlib.backend_bases.register_backend('dxf', FigureCanvasDxf)
 
 Based on matplotlib.backends.backend_template.py.
-
-Copyright (C) 2014 David M Kent
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the "Software"), to deal in
-the Software without restriction, including without limitation the rights to
-use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software is furnished to do so,
-subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
 
-from __future__ import absolute_import, division, unicode_literals
-from io import BytesIO, StringIO
-import os
-import sys
+from io import StringIO
 import math
 import re
-import warnings
 
 import matplotlib
 from matplotlib.backend_bases import (
@@ -50,8 +27,6 @@ from matplotlib.backend_bases import (
     FigureManagerBase,
 )
 from matplotlib.transforms import Affine2D
-import matplotlib.transforms as transforms
-import matplotlib.collections as mplc
 import numpy as np
 from shapely import Point
 from shapely.geometry import LineString, Polygon
@@ -117,6 +92,14 @@ def filter_invalid_coordinates(vertices):
     else:
         return [v for v in vertices if is_valid_coordinate(v)]
 
+from .color_utils import rgb_to_dxf
+from .fm_layers import (
+    create_fm_layers,
+    determine_element_layer,
+    determine_text_layer,
+)
+from .geometry_utils import filter_invalid_coordinates, is_valid_coordinate
+from .text_drawing import draw_text_entity
 
 class RendererDxf(RendererBase):
     """
@@ -153,7 +136,7 @@ class RendererDxf(RendererBase):
         drawing.header["$EXTMAX"] = (self.width, self.height, 0)
 
         if self.use_fm_layers:
-            self._create_fm_layers(drawing)
+            create_fm_layers(drawing)
 
         self.drawing = drawing
         self.modelspace = modelspace
@@ -198,24 +181,6 @@ class RendererDxf(RendererBase):
         
         return self.figure.axes[self._next_axes_index]
 
-    def _create_fm_layers(self, drawing):
-        """Create FM-specific layers with specific colors"""
-        fm_layers = {
-            "FM-Frame": 3,  # Green - frames, ticks, gridlines
-            "FM-Graph": 4,  # Cyan - data graphs/lines
-            "FM-Location": 6,  # Magenta - location name text
-            "FM-Method": 5,  # Blue - method icons and names
-            "FM-Depth": 1,  # Red - Y-axis values (depth/elevation)
-            "FM-Value": 8,  # Grey - X-axis values
-            "FM-Text": 2,  # Yellow - axis labels and other text
-            "FM-Grid-Vertical": 7,  # Light Blue - vertical grid lines
-            "FM-Grid-Horizontal": 7,  # Light Blue - horizontal grid lines
-        }
-
-        for layer_name, color in fm_layers.items():
-            layer = drawing.layers.add(layer_name)
-            layer.dxf.color = color
-
     def clear(self):
         """Reset the renderer."""
         self._init_drawing()
@@ -248,101 +213,24 @@ class RendererDxf(RendererBase):
             self.current_write_target = self._write_target_stack.pop()
 
     def _determine_element_layer(self):
-        """Determine which layer to use based on matplotlib element context"""
+        """Determine which layer to use based on matplotlib element context."""
         if not self.use_fm_layers:
             return "0"
-
-        # Check if ANY active group has gid for FM layers
-        for group_name in self._groupd:
-            if self._group_gids.get(group_name) == "FM-Method":
-                return "FM-Method"
-            if self._group_gids.get(group_name) == "FM-Grid-Vertical":
-                return "FM-Grid-Vertical"
-            if self._group_gids.get(group_name) == "FM-Grid-Horizontal":
-                return "FM-Grid-Horizontal"
-            if self._group_gids.get(group_name) == "FM-Frame":
-                return "FM-Frame"
-
-        if not self._groupd:
-            return "0"
-
-        context_str = " ".join(self._groupd).lower()
-        current_element = self._groupd[-1].lower()
-
-        # Patches - defer to size analysis
-        if current_element == "patch":
-            return "PENDING"
-
-        # Line2D elements - data
-        elif current_element == "line2d":
-            return "FM-Graph"
-
-        # Collections - check what type
-        # Collections - check what type
-        elif current_element == "collection":
-            return "FM-Graph"
-
-        # Method collection marker added by draw_path_collection for fills
-        elif current_element == "method_collection":
-            return "FM-Graph"
-
-        # Text elements
-        elif current_element == "text":
-            return "FM-Text"
-
-        return "0"
+        return determine_element_layer(
+            self._groupd,
+            self._group_gids,
+        )
 
     def _determine_text_layer(self, text_content, fontsize):
-        """Determine text layer based on matplotlib context and content"""
+        """Determine text layer based on matplotlib context and content."""
         if not self.use_fm_layers:
             return "0"
-
-        # Check if ANY active group has method_symbol gid
-        for group_name in self._groupd:
-            if self._group_gids.get(group_name) == "FM-Method":
-                return "FM-Method"
-
-        context_str = " ".join(self._groupd).lower() if self._groupd else ""
-
-        # Y-axis elements -> Depth
-        if any(keyword in context_str for keyword in ["yaxis", "ytick"]):
-            return "FM-Depth"
-
-        # X-axis elements -> Value
-        if any(keyword in context_str for keyword in ["xaxis", "xtick"]):
-            return "FM-Value"
-
-        # Legend elements -> Text
-        if "legend" in context_str:
-            return "FM-Text"
-
-        # Title elements and large text -> Location
-        if "title" in context_str:
-            if fontsize > 8:
-                return "FM-Location"
-            else:
-                return "FM-Method"
-
-        # Text in general axes context - check position and content
-        if "axes" in context_str:
-            if len(self._groupd) == 3:  # ['figure', 'axes', 'text']
-                if fontsize > 8:
-                    return "FM-Location"
-                else:
-                    return "FM-Text"
-
-        # Axis labels -> Text
-        if any(keyword in context_str for keyword in ["xlabel", "ylabel"]):
-            return "FM-Text"
-
-        # Numeric patterns
-        if re.match(r"^\s*[-+]?\d*\.?\d+\s*$", text_content):
-            if "y" in context_str or "ytick" in context_str:
-                return "FM-Depth"
-            elif "x" in context_str or "xtick" in context_str:
-                return "FM-Value"
-
-        return "FM-Text"
+        return determine_text_layer(
+            self._groupd,
+            self._group_gids,
+            text_content,
+            fontsize,
+        )
 
     def _analyze_patch_size(self, vertices, gc):
         """Simple shape-based classification of patches"""
@@ -352,8 +240,6 @@ class RendererDxf(RendererBase):
         max_x, max_y = np.max(verts, axis=0)
         width = max_x - min_x
         height = max_y - min_y
-        area = width * height
-
         # Check if patch has hatching
         has_hatch = gc.get_hatch() is not None
         if has_hatch:
@@ -482,7 +368,7 @@ class RendererDxf(RendererBase):
             return entity
 
     def _draw_mpl_line2d(self, gc, path, transform):
-        line = self._draw_mpl_lwpoly(gc, path, transform, obj="line2d")
+        self._draw_mpl_lwpoly(gc, path, transform, obj="line2d")
 
     def _draw_mpl_patch(self, gc, path, transform, rgbFace=None):
         """Draw a matplotlib patch object"""
@@ -509,7 +395,7 @@ class RendererDxf(RendererBase):
 
         # Fill the patch if needed
         if rgbFace is not None:
-            if type(poly) == list:
+            if isinstance(poly, list):
                 for pol in poly:
                     hatch = self.current_write_target.add_hatch(color=256, dxfattribs=dxfattribs)
                     hatch.set_solid_fill()
@@ -600,9 +486,7 @@ class RendererDxf(RendererBase):
                                 color=256, dxfattribs=hatch_attrs
                             )
                             hatch.set_solid_fill()
-                            line = hatch.paths.add_polyline_path(
-                                clipped, is_closed=True
-                            )
+                            hatch.paths.add_polyline_path(clipped, is_closed=True)
 
     def draw_path_collection(
         self,
@@ -644,8 +528,6 @@ class RendererDxf(RendererBase):
                 for offset_idx, offset in enumerate(transformed_offsets):
                     # Build the combined transform
                     # Start with master transform and add translation for offset
-                    from matplotlib.transforms import Affine2D
-
                     combined_transform = master_transform + Affine2D().translate(
                         offset[0], offset[1]
                     )

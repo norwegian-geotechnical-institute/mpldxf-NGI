@@ -1,5 +1,41 @@
 # Changes
 
+## Version 1.0.5 
+
+_2026-04-07_
+
+Tidy:
+- move code from `backend_dxf.py` into other/new files:
+  - `rgb_to_dxf(rgb_val)` into `color_utils.py`
+  - fm layer logic into `fm_layers`
+  - `filter_invalid_coordinates(vertices)` and `is_valid_coordinate(coord)` into `geometry_utils.py`
+  - text drawing logic into `text_drawing.py`
+
+## Version 1.0.4
+
+_2026-03-31_
+
+Add:
+- Reusable helpers in `tests/conftest.py` 
+- Extended test coverage:
+  - clipping
+  - markers
+  - single point plots
+  - marker only plots
+  - unfilled markers
+  - dashed lines
+  - contour hatches
+  - FM layers
+  - FM test routing
+  - geo-pattern artists
+  - rotated/aligned text
+- added xfail tests for known gaps: NaN-separated lines should split into two polylines, and FM gridlines should route to dedicated grid layers
+
+Tidy
+- output pngs and xdfs are saved locally in `tests/artifacts`
+- removed duplicated test code in `mpldfx/test_backend_ezdxf.py` 
+
+
 ## Version 1.0.3
 
 _2026-02-24_
