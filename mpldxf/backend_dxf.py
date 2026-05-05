@@ -18,7 +18,6 @@ Based on matplotlib.backends.backend_template.py.
 from io import StringIO
 import math
 import re
-import sys
 
 import matplotlib
 from matplotlib.backend_bases import (
@@ -33,9 +32,16 @@ from shapely import Point
 from shapely.geometry import LineString, Polygon
 import ezdxf
 from ezdxf.enums import TextEntityAlignment
-from ezdxf.math.clipping import Clipping, ClippingRect2d, ConvexClippingPolygon2d
+from ezdxf.math.clipping import ClippingRect2d
 import os
-from . import dxf_colors
+from .color_utils import rgb_to_dxf
+from .fm_layers import (
+    create_fm_layers,
+    determine_element_layer,
+    determine_text_layer,
+)
+from .geometry_utils import filter_invalid_coordinates, is_valid_coordinate
+
 
 # Feature flags (environment variables)
 # - MPLDXF_USE_SUBPLOT_BLOCKS=1 (default): write each subplot into its own block
@@ -55,52 +61,6 @@ def _env_flag(name: str, default: bool) -> bool:
         return False
     return default
 
-# When packaged with py2exe ezdxf has issues finding its templates
-# We tell it where to find them using this.
-# Note we also need to make sure they get packaged by adding them to the
-# configuration in setup.py
-if hasattr(sys, "frozen"):
-    ezdxf.options.template_dir = os.path.dirname(sys.executable)
-
-
-def rgb_to_dxf(rgb_val):
-    """Convert an RGB[A] colour to DXF colour index."""
-    if rgb_val is None:
-        dxfcolor = dxf_colors.WHITE
-    # change black to white
-    elif np.allclose(np.array(rgb_val[:3]), np.zeros(3)):
-        dxfcolor = dxf_colors.nearest_index([255, 255, 255])
-    else:
-        dxfcolor = dxf_colors.nearest_index([255.0 * val for val in rgb_val[:3]])
-    return dxfcolor
-
-
-def is_valid_coordinate(coord):
-    """Check if a coordinate contains only finite numbers (no NaN or Inf)."""
-    coord_array = np.asarray(coord)
-    return np.all(np.isfinite(coord_array))
-
-
-def filter_invalid_coordinates(vertices):
-    """Filter out vertices with NaN or Inf values."""
-    if len(vertices) == 0:
-        return vertices
-
-    # Handle both 1D list of coordinates and 2D array of vertices
-    vertices_array = np.asarray(vertices)
-    if vertices_array.ndim == 1:
-        return vertices if is_valid_coordinate(vertices) else []
-    else:
-        return [v for v in vertices if is_valid_coordinate(v)]
-
-from .color_utils import rgb_to_dxf
-from .fm_layers import (
-    create_fm_layers,
-    determine_element_layer,
-    determine_text_layer,
-)
-from .geometry_utils import filter_invalid_coordinates, is_valid_coordinate
-from .text_drawing import draw_text_entity
 
 class RendererDxf(RendererBase):
     """
