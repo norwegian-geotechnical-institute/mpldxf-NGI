@@ -7,12 +7,13 @@ This is a Matplotlib backend that enables Matplotlib to save figures as DXF draw
 This package builds on the `ezdxf` package by Manfred Moitzi:
 [ezdxf on Bitbucket](http://bitbucket.org/mozman/ezdxf)
 
-## Installation
+## Installation of dependencies
 
-The package can be cloned and installed using poetry:
+The package dependencies can be installed with uv
 
 ```bash
-poetry install
+uv sync --upgrade
+source .venv/bin/activate
 ```
 
 ## Usage
