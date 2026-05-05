@@ -42,9 +42,7 @@ plt.savefig('myplot.dxf')
 `mpldxf` can optionally write each subplot into its own DXF block (nested under a single `MAIN_PLOT` block) to keep modelspace clean and make downstream CAD reuse easier.
 
 - Default: enabled
-- Disable (legacy “write directly to modelspace” behavior): set `MPLDXF_USE_SUBPLOT_BLOCKS=0`
-
-For upstream libraries, prefer `backend_dxf.make_figure_canvas(use_subplot_blocks=...)` so you don't rely on process-wide environment variables.
+- Disable (legacy “write directly to modelspace” behavior): pass `use_subplot_blocks=False` via `backend_dxf.make_figure_canvas(...)`.
 
 
 ## Warning

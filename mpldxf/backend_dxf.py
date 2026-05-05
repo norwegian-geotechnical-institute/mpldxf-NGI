@@ -43,23 +43,10 @@ from .fm_layers import (
 from .geometry_utils import filter_invalid_coordinates, is_valid_coordinate
 
 
-# Feature flags (environment variables)
-# - MPLDXF_USE_SUBPLOT_BLOCKS=1 (default): write each subplot into its own block
-#   and nest them under a single MAIN_PLOT block inserted once into modelspace.
-# - MPLDXF_USE_SUBPLOT_BLOCKS=0: legacy behavior, write everything directly to
-#   modelspace with no generated blocks.
-
-
-def _env_flag(name: str, default: bool) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    raw = raw.strip().lower()
-    if raw in {"1", "true", "yes", "y", "on"}:
-        return True
-    if raw in {"0", "false", "no", "n", "off"}:
-        return False
-    return default
+#
+# Note: Matplotlib backend registration does not accept kwargs. If you need to
+# configure options like subplot sub-blocks in an upstream library, use
+# ``make_figure_canvas(...)`` to produce a configured FigureCanvas class.
 
 
 class RendererDxf(RendererBase):
@@ -873,11 +860,9 @@ class FigureCanvasDxf(FigureCanvasBase):
 
     DXFVERSION = "AC1032"
 
-    def __init__(self, figure, use_fm_layers=False, use_subplot_blocks=None):
+    def __init__(self, figure, use_fm_layers=False, use_subplot_blocks=True):
         super().__init__(figure)
         self.use_fm_layers = use_fm_layers
-        if use_subplot_blocks is None:
-            use_subplot_blocks = _env_flag("MPLDXF_USE_SUBPLOT_BLOCKS", True)
         self.use_subplot_blocks = bool(use_subplot_blocks)
         self._lastKey = None
 
@@ -1050,7 +1035,11 @@ def make_figure_canvas(*, use_fm_layers=False, use_subplot_blocks=None):
             )
 
     suffix = "FM" if use_fm_layers else "Default"
-    sub = "SubBlocksOn" if (use_subplot_blocks is True or use_subplot_blocks is None) else "SubBlocksOff"
+    sub = (
+        "SubBlocksDefault"
+        if use_subplot_blocks is None
+        else ("SubBlocksOn" if use_subplot_blocks else "SubBlocksOff")
+    )
     _FigureCanvasDxfConfigured.__name__ = f"FigureCanvasDxf{suffix}{sub}"
     return _FigureCanvasDxfConfigured
 
