@@ -61,6 +61,24 @@ from ezdxf.math.clipping import Clipping, ClippingRect2d, ConvexClippingPolygon2
 
 from . import dxf_colors
 
+# Feature flags (environment variables)
+# - MPLDXF_USE_SUBPLOT_BLOCKS=1 (default): write each subplot into its own block
+#   and nest them under a single MAIN_PLOT block inserted once into modelspace.
+# - MPLDXF_USE_SUBPLOT_BLOCKS=0: legacy behavior, write everything directly to
+#   modelspace with no generated blocks.
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    raw = raw.strip().lower()
+    if raw in {"1", "true", "yes", "y", "on"}:
+        return True
+    if raw in {"0", "false", "no", "n", "off"}:
+        return False
+    return default
+
 # When packaged with py2exe ezdxf has issues finding its templates
 # We tell it where to find them using this.
 # Note we also need to make sure they get packaged by adding them to the
@@ -106,13 +124,22 @@ class RendererDxf(RendererBase):
     Renders the drawing using the ``ezdxf`` package with Field Manager layer support.
     """
 
-    def __init__(self, width, height, dpi, dxfversion, use_fm_layers=False):
+    def __init__(
+        self,
+        width,
+        height,
+        dpi,
+        dxfversion,
+        use_fm_layers=False,
+        use_subplot_blocks=True,
+    ):
         RendererBase.__init__(self)
         self.height = height
         self.width = width
         self.dpi = dpi
         self.dxfversion = dxfversion
         self.use_fm_layers = use_fm_layers
+        self.use_subplot_blocks = use_subplot_blocks
         self._init_drawing()
         self._groupd = []
         self._group_gids = {}
@@ -137,6 +164,8 @@ class RendererDxf(RendererBase):
         self._axes_block_refs = set()
 
     def init_main_plot_block(self):
+        if not self.use_subplot_blocks:
+            return
         if self.current_write_target is self.modelspace:
             block_name = "MAIN_PLOT"
             self.drawing.blocks.new(name=block_name)
@@ -159,6 +188,8 @@ class RendererDxf(RendererBase):
         return self._axes_block_names[bounds]
 
     def block_for_axes(self, ax):
+        if not self.use_subplot_blocks:
+            return self.modelspace
         return self.drawing.blocks[self._get_block_name_for_axes(ax)]
 
     def _get_next_axes_for_group(self):
@@ -191,7 +222,7 @@ class RendererDxf(RendererBase):
 
     def open_group(self, s, gid=None):
         """Open a grouping element with label *s*."""
-        if s == "axes" and hasattr(self, "figure"):
+        if self.use_subplot_blocks and s == "axes" and hasattr(self, "figure"):
             self._write_target_stack.append(self.current_write_target)
             ax = self._get_next_axes_for_group()
             if ax is not None:
@@ -999,9 +1030,12 @@ class FigureCanvasDxf(FigureCanvasBase):
 
     DXFVERSION = "AC1032"
 
-    def __init__(self, figure, use_fm_layers=False):
+    def __init__(self, figure, use_fm_layers=False, use_subplot_blocks=None):
         super().__init__(figure)
         self.use_fm_layers = use_fm_layers
+        if use_subplot_blocks is None:
+            use_subplot_blocks = _env_flag("MPLDXF_USE_SUBPLOT_BLOCKS", True)
+        self.use_subplot_blocks = bool(use_subplot_blocks)
         self._lastKey = None
 
     def get_dxf_renderer(self, cleared=False):
@@ -1023,6 +1057,7 @@ class FigureCanvasDxf(FigureCanvasBase):
                 self.figure.dpi,
                 self.DXFVERSION,
                 self.use_fm_layers,
+                use_subplot_blocks=self.use_subplot_blocks,
             )
             self._lastKey = key
         elif cleared:

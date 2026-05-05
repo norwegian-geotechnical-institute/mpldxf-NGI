@@ -29,6 +29,13 @@ plt.plot(range(10))
 plt.savefig('myplot.dxf')
 ```
 
+### Feature flags
+
+`mpldxf` can optionally write each subplot into its own DXF block (nested under a single `MAIN_PLOT` block) to keep modelspace clean and make downstream CAD reuse easier.
+
+- Default: enabled
+- Disable (legacy “write directly to modelspace” behavior): set `MPLDXF_USE_SUBPLOT_BLOCKS=0`
+
 
 ## Warning
 

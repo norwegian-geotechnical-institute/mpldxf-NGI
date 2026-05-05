@@ -45,6 +45,23 @@ def drawn_entities(doc):
 class TestDxfBackendCase(unittest.TestCase):
     """Tests for the dxf backend."""
 
+    def test_subplot_blocks_feature_flag_off_keeps_modelspace(self):
+        renderer = backend_dxf.RendererDxf(
+            100,
+            100,
+            72,
+            backend_dxf.FigureCanvasDxf.DXFVERSION,
+            use_subplot_blocks=False,
+        )
+
+        renderer.init_main_plot_block()
+        assert "MAIN_PLOT" not in {block.name for block in renderer.drawing.blocks}
+
+        original_target = renderer.current_write_target
+        renderer.open_group("axes")
+        renderer.close_group("axes")
+        assert renderer.current_write_target is original_target
+
     def test_plot_line_with_no_axis(self):
         """Test a simple line-plot command."""
         plt.gca().patch.set_visible(False)
