@@ -18,6 +18,7 @@ Based on matplotlib.backends.backend_template.py.
 from io import StringIO
 import math
 import re
+import sys
 
 import matplotlib
 from matplotlib.backend_bases import (
@@ -33,7 +34,7 @@ from shapely.geometry import LineString, Polygon
 import ezdxf
 from ezdxf.enums import TextEntityAlignment
 from ezdxf.math.clipping import Clipping, ClippingRect2d, ConvexClippingPolygon2d
-
+import os
 from . import dxf_colors
 
 # Feature flags (environment variables)

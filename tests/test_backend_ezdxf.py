@@ -1,9 +1,10 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
-
+import unittest 
 from mpldxf import backend_dxf
-
+import matplotlib
+import ezdxf
 
 matplotlib.backend_bases.register_backend("dxf", backend_dxf.FigureCanvas)
 matplotlib.use("Agg")
