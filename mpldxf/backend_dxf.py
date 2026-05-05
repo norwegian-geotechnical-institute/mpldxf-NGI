@@ -1032,6 +1032,29 @@ class FigureCanvasDxfFM(FigureCanvasDxf):
         super().__init__(figure, use_fm_layers=True)
 
 
+def make_figure_canvas(*, use_fm_layers=False, use_subplot_blocks=None):
+    """
+    Create a FigureCanvas class with fixed options.
+
+    Matplotlib's ``register_backend()`` expects a FigureCanvas *class* and does
+    not provide a way to pass extra kwargs at registration time, so upstream
+    libraries can use this factory to configure mpldxf behavior.
+    """
+
+    class _FigureCanvasDxfConfigured(FigureCanvasDxf):
+        def __init__(self, figure):
+            super().__init__(
+                figure,
+                use_fm_layers=use_fm_layers,
+                use_subplot_blocks=use_subplot_blocks,
+            )
+
+    suffix = "FM" if use_fm_layers else "Default"
+    sub = "SubBlocksOn" if (use_subplot_blocks is True or use_subplot_blocks is None) else "SubBlocksOff"
+    _FigureCanvasDxfConfigured.__name__ = f"FigureCanvasDxf{suffix}{sub}"
+    return _FigureCanvasDxfConfigured
+
+
 FigureManagerDXF = FigureManagerBase
 
 # Standard names that backend.__init__ is expecting
