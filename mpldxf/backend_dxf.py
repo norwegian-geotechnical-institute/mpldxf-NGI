@@ -18,6 +18,7 @@ Based on matplotlib.backends.backend_template.py.
 from io import StringIO
 import math
 import re
+import warnings
 
 import matplotlib
 from matplotlib.backend_bases import (
@@ -41,12 +42,6 @@ from .fm_layers import (
     determine_text_layer,
 )
 from .geometry_utils import filter_invalid_coordinates, is_valid_coordinate
-
-
-#
-# Note: Matplotlib backend registration does not accept kwargs. If you need to
-# configure options like subplot sub-blocks in an upstream library, use
-# ``make_figure_canvas(...)`` to produce a configured FigureCanvas class.
 
 
 class RendererDxf(RendererBase):
@@ -126,7 +121,15 @@ class RendererDxf(RendererBase):
     def _get_next_axes_for_group(self):
         if not hasattr(self, "figure"):
             return None
-        
+
+        if self._next_axes_index >= len(self.figure.axes):
+            warnings.warn(
+                "Got more 'axes' draw groups than Axes in the figure; leaving DXF write target unchanged.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            return None
+
         return self.figure.axes[self._next_axes_index]
 
     def clear(self):
@@ -136,9 +139,9 @@ class RendererDxf(RendererBase):
     def open_group(self, s, gid=None):
         """Open a grouping element with label *s*."""
         if self.use_subplot_blocks and s == "axes" and hasattr(self, "figure"):
-            self._write_target_stack.append(self.current_write_target)
             ax = self._get_next_axes_for_group()
             if ax is not None:
+                self._write_target_stack.append(self.current_write_target)
                 block_name = self._get_block_name_for_axes(ax)
                 if block_name not in self._axes_block_refs:
                     # Insert each subplot block once into the current plot block,
@@ -146,7 +149,7 @@ class RendererDxf(RendererBase):
                     self.current_write_target.add_blockref(block_name, (0, 0))
                     self._axes_block_refs.add(block_name)
                 self.current_write_target = self.drawing.blocks[block_name]
-            self._next_axes_index += 1
+                self._next_axes_index += 1
         self._groupd.append(s)
         if gid:
             self._group_gids[s] = gid  # Store gid per group name
@@ -863,7 +866,7 @@ class FigureCanvasDxf(FigureCanvasBase):
     def __init__(self, figure, use_fm_layers=False, use_subplot_blocks=True):
         super().__init__(figure)
         self.use_fm_layers = use_fm_layers
-        self.use_subplot_blocks = bool(use_subplot_blocks)
+        self.use_subplot_blocks = use_subplot_blocks
         self._lastKey = None
 
     def get_dxf_renderer(self, cleared=False):
