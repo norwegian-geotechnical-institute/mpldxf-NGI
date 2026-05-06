@@ -2,6 +2,7 @@ ncontour/i18n/*.qm
 ncontour/resources.py
 venv
 *.dxf
+*.png
 .~lock*
 
 # Byte-compiled / optimized / DLL files
