@@ -126,6 +126,7 @@ class RendererDxf(RendererBase):
 
     def clear(self):
         """Reset the renderer."""
+        super().clear()
         self._init_drawing()
 
     def _push_write_target(self):
@@ -855,7 +856,6 @@ class FigureCanvasDxf(FigureCanvasBase):
         Draw the figure using the renderer
         """
         renderer = self.get_dxf_renderer()
-        renderer.clear()
         renderer.figure = self.figure
         renderer.init_main_plot_block()
         self.figure.draw(renderer)
