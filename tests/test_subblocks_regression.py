@@ -1,5 +1,4 @@
 import matplotlib.pyplot as plt
-import pytest
 
 from mpldxf import backend_dxf
 
