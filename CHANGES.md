@@ -1,6 +1,6 @@
 # Changes
 
-## Version 1.0.6 
+## Version 1.0.7
 
 _2026-05-06_
 
