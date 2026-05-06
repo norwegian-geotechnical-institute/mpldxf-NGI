@@ -136,20 +136,60 @@ class RendererDxf(RendererBase):
         """Reset the renderer."""
         self._init_drawing()
 
+    def _push_write_target(self):
+        # ``current_write_target`` is where we add new DXF entities.
+        # It can be modelspace (legacy mode) or a block definition (sub-block mode).
+        # When entering an axes-group we temporarily redirect drawing into a subplot
+        # block; this stack remembers the previous destination so we can restore it.
+        """Save the current entity destination so it can be restored later."""
+        self._write_target_stack.append(self.current_write_target)
+
+    def _pop_write_target(self):
+        # Restore the last saved write destination. If the stack is empty we no-op,
+        # because Matplotlib group callbacks can be noisy and we want to be robust
+        # to mismatched open/close sequences.
+        """Restore the previous entity destination (no-op if stack is empty)."""
+        if self._write_target_stack:
+            self.current_write_target = self._write_target_stack.pop()
+
+    def _enter_axes_group(self):
+        """
+        Enter an "axes" draw group when sub-blocks are enabled.
+
+        Effect:
+        - Save the current destination (usually the main plot block) on the stack.
+        - Ensure there's a subplot block for this Axes (named by its position).
+        - Insert that subplot block *once* into the current plot block.
+        - Redirect subsequent drawing so entities land inside the subplot block.
+
+        When the group closes, ``close_group("axes")`` restores the previous
+        destination by popping the stack.
+        """
+        """Redirect drawing into a subplot block for the next Axes, if available."""
+        ax = self._get_next_axes_for_group()
+        if ax is None:
+            return
+
+        self._push_write_target()
+
+        block_name = self._get_block_name_for_axes(ax)
+        if block_name not in self._axes_block_refs:
+            # Insert each subplot block once into the current plot block, then draw
+            # the axes contents into the subplot block definition itself.
+            self.current_write_target.add_blockref(block_name, (0, 0))
+            self._axes_block_refs.add(block_name)
+
+        # Redirect drawing for everything inside this Axes group.
+        self.current_write_target = self.drawing.blocks[block_name]
+        # Advance so the next axes-group maps to the next Axes in figure.axes.
+        self._next_axes_index += 1
+
     def open_group(self, s, gid=None):
         """Open a grouping element with label *s*."""
         if self.use_subplot_blocks and s == "axes" and hasattr(self, "figure"):
-            ax = self._get_next_axes_for_group()
-            if ax is not None:
-                self._write_target_stack.append(self.current_write_target)
-                block_name = self._get_block_name_for_axes(ax)
-                if block_name not in self._axes_block_refs:
-                    # Insert each subplot block once into the current plot block,
-                    # then draw the axes contents into that block definition.
-                    self.current_write_target.add_blockref(block_name, (0, 0))
-                    self._axes_block_refs.add(block_name)
-                self.current_write_target = self.drawing.blocks[block_name]
-                self._next_axes_index += 1
+            # Only Axes groups affect the DXF write target. All other groups are
+            # still tracked in ``self._groupd`` for FM layer routing.
+            self._enter_axes_group()
         self._groupd.append(s)
         if gid:
             self._group_gids[s] = gid  # Store gid per group name
@@ -160,8 +200,12 @@ class RendererDxf(RendererBase):
             self._groupd.pop()
             # Remove gid for this group
             self._group_gids.pop(s, None)
-        if s == "axes" and self._write_target_stack:
-            self.current_write_target = self._write_target_stack.pop()
+        # Matplotlib's group callbacks can be noisy; only Axes groups manipulate the
+        # write target stack, and we defensively no-op if the stack is empty.
+        if s == "axes":
+            # Return to whatever destination was active before this axes-group
+            # (usually the main plot block or modelspace).
+            self._pop_write_target()
 
     def _determine_element_layer(self):
         """Determine which layer to use based on matplotlib element context."""

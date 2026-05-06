@@ -213,6 +213,33 @@ class TestDxfBackendCase(unittest.TestCase):
         assert len(list(doc.modelspace().query("INSERT"))) == 1
         assert len(list(plot_blocks[0].query("INSERT"))) == 2
 
+    def test_subplots_with_use_subplot_blocks_false_write_to_modelspace(self):
+        class FigureCanvasDxfNoBlocks(backend_dxf.FigureCanvasDxf):
+            def __init__(self, figure):
+                super().__init__(figure, use_subplot_blocks=False)
+
+        # Avoid leaking backend registration changes to other tests.
+        matplotlib.backend_bases.register_backend("dxf", FigureCanvasDxfNoBlocks)
+        try:
+            fig, axs = plt.subplots(1, 2)
+            axs[0].plot([0, 1], [0, 1])
+            axs[1].plot([0, 1], [1, 0])
+
+            try:
+                outfile = "tests/files/test_subplots_no_blocks.dxf"
+                plt.savefig(outfile, transparent=True)
+            finally:
+                plt.close(fig)
+
+            doc = ezdxf.readfile(outfile)
+            names = {block.name for block in doc.blocks}
+            assert "main_plot" not in names
+            assert not any(name.startswith("subplot_") for name in names)
+            assert len(list(doc.modelspace().query("INSERT"))) == 0
+            assert len(list(doc.modelspace())) > 0
+        finally:
+            matplotlib.backend_bases.register_backend("dxf", backend_dxf.FigureCanvas)
+
     def test_extra_axes_group_warns_and_keeps_target(self):
         fig, ax = plt.subplots()
         renderer = backend_dxf.RendererDxf(
