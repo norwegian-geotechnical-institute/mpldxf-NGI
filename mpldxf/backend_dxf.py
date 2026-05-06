@@ -188,13 +188,16 @@ class RendererDxf(RendererBase):
 
     def close_group(self, s):
         """Close a grouping element with label *s*."""
-        if self._groupd and self._groupd[-1] == s:
+        closed = bool(self._groupd and self._groupd[-1] == s)
+        if closed:
             self._groupd.pop()
             # Remove gid for this group
             self._group_gids.pop(s, None)
-        # Matplotlib's group callbacks can be noisy; only Axes groups manipulate the
-        # write target stack, and we defensively no-op if the stack is empty.
-        if s == "axes":
+
+        # Only pop the write target when we actually closed the corresponding
+        # group entry. This keeps the write-target stack aligned with the group
+        # stack even if Matplotlib emits mismatched/out-of-order callbacks.
+        if closed and s == "axes" and self.use_subplot_blocks:
             # Return to whatever destination was active before this axes-group
             # (usually the main plot block or modelspace).
             self._pop_write_target()
