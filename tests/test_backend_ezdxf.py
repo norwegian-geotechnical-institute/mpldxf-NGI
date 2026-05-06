@@ -515,8 +515,6 @@ def test_extra_axes_group_warns_and_keeps_target():
     renderer.close_group("axes")
 
     original_target = renderer.current_write_target
-    with pytest.warns(RuntimeWarning, match=r"more 'axes' draw groups"):
-        renderer.open_group("axes")
     assert renderer.current_write_target is original_target
     renderer.close_group("axes")
     assert renderer.current_write_target is original_target

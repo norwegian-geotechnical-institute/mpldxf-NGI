@@ -755,8 +755,6 @@ class RendererDxf(RendererBase):
 
     def draw_text(self, gc, x, y, s, prop, angle, ismath=False, mtext=None):
         """Draw text with proper layer assignment."""
-        # Keep the text handling in one place (see ``mpldxf.text_drawing``).
-        # Use ``current_write_target`` so text respects subplot blocks when enabled.
         draw_text_entity(
             self.current_write_target,
             gc,
@@ -768,20 +766,6 @@ class RendererDxf(RendererBase):
             self.use_fm_layers,
             self._determine_text_layer,
         )
-
-    def _map_align(self, align, vert=False):
-        """Translate a matplotlib text alignment to the ezdxf alignment."""
-        if align in ["right", "center", "left", "top", "bottom", "middle"]:
-            align = align.upper()
-        elif align == "baseline":
-            align = ""
-        elif align == "center_baseline":
-            align = "MIDDLE"
-        else:
-            raise NotImplementedError
-        if vert and align == "CENTER":
-            align = "MIDDLE"
-        return align
 
     def flipy(self):
         return False

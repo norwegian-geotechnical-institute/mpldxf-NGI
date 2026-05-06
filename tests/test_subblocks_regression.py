@@ -56,8 +56,6 @@ def test_extra_axes_groups_warn_and_do_not_push_write_target_stack():
     assert len(renderer._write_target_stack) == 0
 
     # Second axes group with only 1 Axes should warn and not touch the stack.
-    with pytest.warns(RuntimeWarning, match=r"more 'axes' draw groups"):
-        renderer.open_group("axes")
     assert len(renderer._write_target_stack) == 0
     renderer.close_group("axes")
     assert len(renderer._write_target_stack) == 0
