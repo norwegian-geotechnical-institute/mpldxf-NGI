@@ -17,7 +17,6 @@ Based on matplotlib.backends.backend_template.py.
 
 from io import StringIO
 import math
-import warnings
 
 from matplotlib.backend_bases import (
     RendererBase,
@@ -120,11 +119,7 @@ class RendererDxf(RendererBase):
             return None
 
         if self._next_axes_index >= len(self.figure.axes):
-            warnings.warn(
-                "Got more 'axes' draw groups than Axes in the figure; leaving DXF write target unchanged.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
+           #Got more 'axes' draw groups than Axes in the figure; leaving DXF write target unchanged
             return None
 
         return self.figure.axes[self._next_axes_index]
