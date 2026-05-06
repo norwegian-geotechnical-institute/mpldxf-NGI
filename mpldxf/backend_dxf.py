@@ -93,7 +93,7 @@ class RendererDxf(RendererBase):
         if not self.use_subplot_blocks:
             return
         if self.current_write_target is self.modelspace:
-            block_name = "MAIN_PLOT"
+            block_name = "main_plot"
             self.drawing.blocks.new(name=block_name)
             # Keep modelspace to a single top-level insert so the whole figure can
             # be reused as one block in downstream CAD workflows.
@@ -106,7 +106,7 @@ class RendererDxf(RendererBase):
 
         bounds = tuple(round(value, 6) for value in ax.get_position().bounds)
         if bounds not in self._axes_block_names:
-            block_name = "SUBPLOT_%d" % (len(self._axes_block_names) + 1)
+            block_name = "subplot_%d" % (len(self._axes_block_names) + 1)
             self.drawing.blocks.new(name=block_name)
             # Twin/shared axes reuse the same subplot block because they occupy
             # the same figure position.

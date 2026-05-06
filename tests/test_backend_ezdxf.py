@@ -13,7 +13,7 @@ matplotlib.use("Agg")
 def drawn_entities(doc):
     block_entities = []
     for block in doc.blocks:
-        if block.name.startswith("SUBPLOT_"):
+        if block.name.startswith("subplot_"):
             block_entities.extend(list(block))
     return block_entities or list(doc.modelspace())
 
@@ -31,7 +31,7 @@ class TestDxfBackendCase(unittest.TestCase):
         )
 
         renderer.init_main_plot_block()
-        assert "MAIN_PLOT" not in {block.name for block in renderer.drawing.blocks}
+        assert "main_plot" not in {block.name for block in renderer.drawing.blocks}
 
         original_target = renderer.current_write_target
         renderer.open_group("axes")
@@ -205,8 +205,8 @@ class TestDxfBackendCase(unittest.TestCase):
             plt.close()
 
         doc = ezdxf.readfile(outfile)
-        plot_blocks = [block for block in doc.blocks if block.name == "MAIN_PLOT"]
-        subplot_blocks = [block for block in doc.blocks if block.name.startswith("SUBPLOT_")]
+        plot_blocks = [block for block in doc.blocks if block.name == "main_plot"]
+        subplot_blocks = [block for block in doc.blocks if block.name.startswith("subplot_")]
 
         assert len(plot_blocks) == 1
         assert len(subplot_blocks) == 2
