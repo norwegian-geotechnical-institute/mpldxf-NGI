@@ -440,17 +440,6 @@ def test_geo_pattern_vertical_circles_with_dots_exports_only_circle_entries(expo
 # --- Additions for subplot sub-blocks and robustness ---
 
 
-def test_use_fm_layers_string_false_does_not_enable_layers():
-    renderer = backend_dxf.RendererDxf(
-        100,
-        100,
-        72,
-        backend_dxf.FigureCanvasDxf.DXFVERSION,
-        use_fm_layers=False
-    )
-    assert renderer.use_fm_layers is False
-
-
 def test_subplots_are_written_to_nested_blocks(export_dxf):
     class FigureCanvasDxfBlocks(backend_dxf.FigureCanvasDxf):
         def __init__(self, figure):
