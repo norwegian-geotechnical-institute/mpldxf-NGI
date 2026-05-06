@@ -35,6 +35,8 @@ import ezdxf
 from ezdxf.enums import TextEntityAlignment
 from ezdxf.math.clipping import ClippingRect2d
 import os
+
+from mpldxf.text_drawing import draw_text_entity
 from .color_utils import rgb_to_dxf
 from .fm_layers import (
     create_fm_layers,
@@ -42,6 +44,21 @@ from .fm_layers import (
     determine_text_layer,
 )
 from .geometry_utils import filter_invalid_coordinates, is_valid_coordinate
+
+
+def _coerce_bool(value, *, default=False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        raw = value.strip().lower()
+        if raw in {"1", "true", "yes", "y", "on"}:
+            return True
+        if raw in {"0", "false", "no", "n", "off"}:
+            return False
+        return default
+    return bool(value)
 
 
 class RendererDxf(RendererBase):
@@ -64,8 +81,8 @@ class RendererDxf(RendererBase):
         self.width = width
         self.dpi = dpi
         self.dxfversion = dxfversion
-        self.use_fm_layers = use_fm_layers
-        self.use_subplot_blocks = use_subplot_blocks
+        self.use_fm_layers = _coerce_bool(use_fm_layers, default=False)
+        self.use_subplot_blocks = _coerce_bool(use_subplot_blocks, default=False)
         self._init_drawing()
         self._groupd = []
         self._group_gids = {}
@@ -762,84 +779,20 @@ class RendererDxf(RendererBase):
                             )
 
     def draw_text(self, gc, x, y, s, prop, angle, ismath=False, mtext=None):
-        """Draw text with proper layer assignment"""
-        if mtext is None:
-            return
-
-        fontsize = self.points_to_pixels(prop.get_size_in_points()) / 2
-
-        dxfattribs = {}
-        if self.use_fm_layers:
-            layer_name = self._determine_text_layer(s, fontsize)
-            dxfattribs["layer"] = layer_name
-            dxfattribs["color"] = 256
-        else:
-            dxfattribs["color"] = rgb_to_dxf(gc.get_rgb())
-
-        s = s.replace("\u2212", "-")
-        s = s.encode("ascii", "ignore").decode()
-
-        if s and len(s) > 0 and s[0] == "$":
-            pattern = r"\\mathbf\{(.*?)\}"
-            stripped_text = re.sub(pattern, r"\1", s)
-            stripped_text = re.sub(r"[$]", "", stripped_text)
-            stripped_text = re.sub(r"\\/", " ", stripped_text)
-            text = self.current_write_target.add_text(
-                stripped_text,
-                height=fontsize,
-                rotation=angle,
-                dxfattribs=dxfattribs,
-            )
-        else:
-            text = self.current_write_target.add_text(
-                s,
-                height=fontsize,
-                rotation=angle,
-                dxfattribs=dxfattribs,
-            )
-
-        # Text alignment
-        if angle == 90.0:
-            if mtext._rotation_mode == "anchor":
-                halign = self._map_align(mtext.get_ha(), vert=False)
-            else:
-                halign = "RIGHT"
-            valign = self._map_align(mtext.get_va(), vert=True)
-        else:
-            halign = self._map_align(mtext.get_ha(), vert=False)
-            valign = self._map_align(mtext.get_va(), vert=True)
-
-        # Build alignment string properly (avoid empty valign causing "_LEFT" etc.)
-        if valign and valign != "":
-            align = valign + "_" + halign
-        else:
-            align = halign
-
-        # Ensure align is never empty (AutoCAD cannot handle empty/None alignment)
-        if not align or align == "" or align == "_":
-            align = "LEFT"
-
-        alignment_map = {
-            "TOP_LEFT": TextEntityAlignment.TOP_LEFT,
-            "TOP_CENTER": TextEntityAlignment.TOP_CENTER,
-            "TOP_RIGHT": TextEntityAlignment.TOP_RIGHT,
-            "MIDDLE_LEFT": TextEntityAlignment.MIDDLE_LEFT,
-            "MIDDLE_CENTER": TextEntityAlignment.MIDDLE_CENTER,
-            "MIDDLE_RIGHT": TextEntityAlignment.MIDDLE_RIGHT,
-            "BOTTOM_LEFT": TextEntityAlignment.BOTTOM_LEFT,
-            "BOTTOM_CENTER": TextEntityAlignment.BOTTOM_CENTER,
-            "BOTTOM_RIGHT": TextEntityAlignment.BOTTOM_RIGHT,
-            "LEFT": TextEntityAlignment.LEFT,
-            "CENTER": TextEntityAlignment.CENTER,
-            "RIGHT": TextEntityAlignment.RIGHT,
-        }
-
-        align = alignment_map.get(align, TextEntityAlignment.BOTTOM_LEFT)
-
-        pos = mtext.get_unitless_position()
-        x, y = mtext.get_transform().transform(pos)
-        p1 = x, y
-        text.set_placement(p1, align=align)
+        """Draw text with proper layer assignment."""
+        # Keep the text handling in one place (see ``mpldxf.text_drawing``).
+        # Use ``current_write_target`` so text respects subplot blocks when enabled.
+        draw_text_entity(
+            self.current_write_target,
+            gc,
+            s,
+            prop,
+            angle,
+            mtext,
+            self.points_to_pixels,
+            self.use_fm_layers,
+            self._determine_text_layer,
+        )
 
     def _map_align(self, align, vert=False):
         """Translate a matplotlib text alignment to the ezdxf alignment."""
@@ -907,10 +860,10 @@ class FigureCanvasDxf(FigureCanvasBase):
 
     DXFVERSION = "AC1032"
 
-    def __init__(self, figure, use_fm_layers=False, use_subplot_blocks=True):
+    def __init__(self, figure, use_fm_layers=False, use_subplot_blocks=False):
         super().__init__(figure)
-        self.use_fm_layers = use_fm_layers
-        self.use_subplot_blocks = use_subplot_blocks
+        self.use_fm_layers = _coerce_bool(use_fm_layers, default=False)
+        self.use_subplot_blocks = _coerce_bool(use_subplot_blocks, default=False)
         self._lastKey = None
 
     def get_dxf_renderer(self, cleared=False):
