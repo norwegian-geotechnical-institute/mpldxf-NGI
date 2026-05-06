@@ -41,22 +41,6 @@ from .fm_layers import (
 )
 from .geometry_utils import filter_invalid_coordinates, is_valid_coordinate
 
-
-def _coerce_bool(value, *, default=False) -> bool:
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        raw = value.strip().lower()
-        if raw in {"1", "true", "yes", "y", "on"}:
-            return True
-        if raw in {"0", "false", "no", "n", "off"}:
-            return False
-        return default
-    return bool(value)
-
-
 class RendererDxf(RendererBase):
     """
     The renderer handles drawing/rendering operations.
@@ -78,7 +62,7 @@ class RendererDxf(RendererBase):
         self.dpi = dpi
         self.dxfversion = dxfversion
         self.use_fm_layers = use_fm_layers
-        self.use_subplot_blocks = _coerce_bool(use_subplot_blocks, default=False)
+        self.use_subplot_blocks = use_subplot_blocks
         self._init_drawing()
         self._groupd = []
         self._group_gids = {}
