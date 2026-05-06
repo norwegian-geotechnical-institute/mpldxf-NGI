@@ -446,7 +446,7 @@ def test_use_fm_layers_string_false_does_not_enable_layers():
         100,
         72,
         backend_dxf.FigureCanvasDxf.DXFVERSION,
-        use_fm_layers="False",
+        use_fm_layers=False
     )
     assert renderer.use_fm_layers is False
 

@@ -17,10 +17,8 @@ Based on matplotlib.backends.backend_template.py.
 
 from io import StringIO
 import math
-import re
 import warnings
 
-import matplotlib
 from matplotlib.backend_bases import (
     RendererBase,
     FigureCanvasBase,
@@ -32,9 +30,7 @@ import numpy as np
 from shapely import Point
 from shapely.geometry import LineString, Polygon
 import ezdxf
-from ezdxf.enums import TextEntityAlignment
 from ezdxf.math.clipping import ClippingRect2d
-import os
 
 from mpldxf.text_drawing import draw_text_entity
 from .color_utils import rgb_to_dxf
@@ -81,7 +77,7 @@ class RendererDxf(RendererBase):
         self.width = width
         self.dpi = dpi
         self.dxfversion = dxfversion
-        self.use_fm_layers = _coerce_bool(use_fm_layers, default=False)
+        self.use_fm_layers = use_fm_layers
         self.use_subplot_blocks = _coerce_bool(use_subplot_blocks, default=False)
         self._init_drawing()
         self._groupd = []
@@ -862,8 +858,8 @@ class FigureCanvasDxf(FigureCanvasBase):
 
     def __init__(self, figure, use_fm_layers=False, use_subplot_blocks=False):
         super().__init__(figure)
-        self.use_fm_layers = _coerce_bool(use_fm_layers, default=False)
-        self.use_subplot_blocks = _coerce_bool(use_subplot_blocks, default=False)
+        self.use_fm_layers = use_fm_layers
+        self.use_subplot_blocks = use_subplot_blocks
         self._lastKey = None
 
     def get_dxf_renderer(self, cleared=False):
