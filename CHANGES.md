@@ -1,5 +1,13 @@
 # Changes
 
+## Version 1.0.7
+
+_2026-05-06_
+
+Add:
+- Nested block export for subplots: one `main_plot` block inserted into modelspace, containing `subplot_n` inserts; each subplot’s geometry is written inside its corresponding `subplot_n` block.
+- `backend_dxf.make_figure_canvas(...)` factory to create a configured FigureCanvas class for `matplotlib.backend_bases.register_backend(...)` (supports `use_subplot_blocks` and `use_fm_layers`).
+
 ## Version 1.0.5 
 
 _2026-04-07_

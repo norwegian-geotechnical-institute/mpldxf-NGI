@@ -18,7 +18,6 @@ Based on matplotlib.backends.backend_template.py.
 from io import StringIO
 import math
 
-import matplotlib
 from matplotlib.backend_bases import (
     RendererBase,
     FigureCanvasBase,
@@ -32,6 +31,7 @@ from shapely.geometry import LineString, Polygon
 import ezdxf
 from ezdxf.math.clipping import ClippingRect2d
 
+from mpldxf.text_drawing import draw_text_entity
 from .color_utils import rgb_to_dxf
 from .fm_layers import (
     create_fm_layers,
@@ -39,7 +39,6 @@ from .fm_layers import (
     determine_text_layer,
 )
 from .geometry_utils import filter_invalid_coordinates, is_valid_coordinate
-from .text_drawing import draw_text_entity
 
 class RendererDxf(RendererBase):
     """
@@ -47,13 +46,22 @@ class RendererDxf(RendererBase):
     Renders the drawing using the ``ezdxf`` package with Field Manager layer support.
     """
 
-    def __init__(self, width, height, dpi, dxfversion, use_fm_layers=False):
-        super().__init__()
+    def __init__(
+        self,
+        width,
+        height,
+        dpi,
+        dxfversion,
+        use_fm_layers=False,
+        use_subplot_blocks=True,
+    ):
+        RendererBase.__init__(self)
         self.height = height
         self.width = width
         self.dpi = dpi
         self.dxfversion = dxfversion
         self.use_fm_layers = use_fm_layers
+        self.use_subplot_blocks = use_subplot_blocks
         self._init_drawing()
         self._groupd = []
         self._group_gids = {}
@@ -71,24 +79,128 @@ class RendererDxf(RendererBase):
 
         self.drawing = drawing
         self.modelspace = modelspace
+        self.current_write_target = modelspace
+        self._write_target_stack = []
+        self._next_axes_index = 0
+        self._axes_block_names = {}
+        self._axes_block_refs = set()
+
+    def init_main_plot_block(self):
+        if not self.use_subplot_blocks:
+            return
+        if self.current_write_target is self.modelspace:
+            block_name = "main_plot"
+            self.drawing.blocks.new(name=block_name)
+            # Keep modelspace to a single top-level insert so the whole figure can
+            # be reused as one block in downstream CAD workflows.
+            self.modelspace.add_blockref(block_name, (0, 0))
+            self.current_write_target = self.drawing.blocks[block_name]
+
+    def _get_block_name_for_axes(self, ax):
+        # get subplot block name according to axis bounds
+        # if subplot does not exist yet, create it
+
+        bounds = tuple(round(value, 6) for value in ax.get_position().bounds)
+        if bounds not in self._axes_block_names:
+            block_name = "subplot_%d" % (len(self._axes_block_names) + 1)
+            self.drawing.blocks.new(name=block_name)
+            # Twin/shared axes reuse the same subplot block because they occupy
+            # the same figure position.
+            self._axes_block_names[bounds] = block_name
+        return self._axes_block_names[bounds]
+
+    def block_for_axes(self, ax):
+        if not self.use_subplot_blocks:
+            return self.modelspace
+        return self.drawing.blocks[self._get_block_name_for_axes(ax)]
+
+    def _get_next_axes_for_group(self):
+        if not hasattr(self, "figure"):
+            return None
+
+        if self._next_axes_index >= len(self.figure.axes):
+           #Got more 'axes' draw groups than Axes in the figure; leaving DXF write target unchanged
+            return None
+
+        return self.figure.axes[self._next_axes_index]
 
     def clear(self):
         """Reset the renderer."""
         super().clear()
         self._init_drawing()
 
+    def _push_write_target(self):
+        # ``current_write_target`` is where we add new DXF entities.
+        # It can be modelspace (legacy mode) or a block definition (sub-block mode).
+        # When entering an axes-group we temporarily redirect drawing into a subplot
+        # block; this stack remembers the previous destination so we can restore it.
+        """Save the current entity destination so it can be restored later."""
+        self._write_target_stack.append(self.current_write_target)
+
+    def _pop_write_target(self):
+        # Restore the last saved write destination. If the stack is empty we no-op,
+        # because Matplotlib group callbacks can be noisy and we want to be robust
+        # to mismatched open/close sequences.
+        """Restore the previous entity destination (no-op if stack is empty)."""
+        if self._write_target_stack:
+            self.current_write_target = self._write_target_stack.pop()
+
+    def _enter_axes_group(self):
+        """
+        Enter an "axes" draw group when sub-blocks are enabled.
+
+        Effect:
+        - Save the current destination (usually the main plot block) on the stack.
+        - Ensure there's a subplot block for this Axes (named by its position).
+        - Insert that subplot block *once* into the current plot block.
+        - Redirect subsequent drawing so entities land inside the subplot block.
+
+        When the group closes, ``close_group("axes")`` restores the previous
+        destination by popping the stack.
+        """
+        ax = self._get_next_axes_for_group()
+        if ax is None:
+            return
+
+        self._push_write_target()
+
+        block_name = self._get_block_name_for_axes(ax)
+        if block_name not in self._axes_block_refs:
+            # Insert each subplot block once into the current plot block, then draw
+            # the axes contents into the subplot block definition itself.
+            self.current_write_target.add_blockref(block_name, (0, 0))
+            self._axes_block_refs.add(block_name)
+
+        # Redirect drawing for everything inside this Axes group.
+        self.current_write_target = self.drawing.blocks[block_name]
+        # Advance so the next axes-group maps to the next Axes in figure.axes.
+        self._next_axes_index += 1
+
     def open_group(self, s, gid=None):
         """Open a grouping element with label *s*."""
+        if self.use_subplot_blocks and s == "axes" and hasattr(self, "figure"):
+            # Only Axes groups affect the DXF write target. All other groups are
+            # still tracked in ``self._groupd`` for FM layer routing.
+            self._enter_axes_group()
         self._groupd.append(s)
         if gid:
             self._group_gids[s] = gid  # Store gid per group name
 
     def close_group(self, s):
         """Close a grouping element with label *s*."""
-        if self._groupd and self._groupd[-1] == s:
+        closed = bool(self._groupd and self._groupd[-1] == s)
+        if closed:
             self._groupd.pop()
             # Remove gid for this group
             self._group_gids.pop(s, None)
+
+        # Only pop the write target when we actually closed the corresponding
+        # group entry. This keeps the write-target stack aligned with the group
+        # stack even if Matplotlib emits mismatched/out-of-order callbacks.
+        if closed and s == "axes" and self.use_subplot_blocks:
+            # Return to whatever destination was active before this axes-group
+            # (usually the main plot block or modelspace).
+            self._pop_write_target()
 
     def _determine_element_layer(self):
         """Determine which layer to use based on matplotlib element context."""
@@ -226,7 +338,7 @@ class RendererDxf(RendererBase):
                     # Validate coordinates before adding to DXF
                     vertices = filter_invalid_coordinates(vertices)
                     if len(vertices) > 0 and vertices[0][0] != 0:
-                        entity = self.modelspace.add_lwpolyline(
+                        entity = self.current_write_target.add_lwpolyline(
                             points=vertices, close=False, dxfattribs=dxfattribs
                         )
                     else:
@@ -238,7 +350,7 @@ class RendererDxf(RendererBase):
                     ]
                     vertices = [v for v in vertices if len(v) > 0]
                     entity = [
-                        self.modelspace.add_lwpolyline(
+                        self.current_write_target.add_lwpolyline(
                             points=points, close=False, dxfattribs=dxfattribs
                         )
                         for points in vertices
@@ -275,14 +387,14 @@ class RendererDxf(RendererBase):
         if rgbFace is not None:
             if isinstance(poly, list):
                 for pol in poly:
-                    hatch = self.modelspace.add_hatch(color=256, dxfattribs=dxfattribs)
+                    hatch = self.current_write_target.add_hatch(color=256, dxfattribs=dxfattribs)
                     hatch.set_solid_fill()
                     hatch.paths.add_polyline_path(
                         pol.get_points(format="xyb"),
                         is_closed=pol.closed,
                     )
             else:
-                hatch = self.modelspace.add_hatch(color=256, dxfattribs=dxfattribs)
+                hatch = self.current_write_target.add_hatch(color=256, dxfattribs=dxfattribs)
                 hatch.set_solid_fill()
                 hatch.paths.add_polyline_path(
                     poly.get_points(format="xyb"),
@@ -355,12 +467,12 @@ class RendererDxf(RendererBase):
                             if self.use_fm_layers:
                                 attrs["layer"] = layer_name
                                 attrs["color"] = 256
-                            self.modelspace.add_lwpolyline(
+                            self.current_write_target.add_lwpolyline(
                                 points=clipped, dxfattribs=attrs
                             )
                         else:
                             hatch_attrs = dxfattribs.copy()
-                            hatch = self.modelspace.add_hatch(
+                            hatch = self.current_write_target.add_hatch(
                                 color=256, dxfattribs=hatch_attrs
                             )
                             hatch.set_solid_fill()
@@ -577,7 +689,7 @@ class RendererDxf(RendererBase):
                         elif dist < 0.5:  # For simple shapes, use fixed threshold
                             should_close = True
 
-                    polyline = self.modelspace.add_lwpolyline(
+                    polyline = self.current_write_target.add_lwpolyline(
                         points=positioned_segment,
                         close=should_close,
                         dxfattribs=dxfattribs,
@@ -589,7 +701,7 @@ class RendererDxf(RendererBase):
                         rgbFace[3] if rgbFace is not None and len(rgbFace) > 3 else 1.0
                     )
                     if should_close and rgbFace is not None and face_alpha > 0:
-                        hatch = self.modelspace.add_hatch(
+                        hatch = self.current_write_target.add_hatch(
                             color=256, dxfattribs=dxfattribs
                         )
                         hatch.set_solid_fill()
@@ -617,7 +729,7 @@ class RendererDxf(RendererBase):
                     # This ensures the circle is centered correctly on the data point
                     center = [dx, dy]
                     if is_valid_coordinate(center):
-                        self.modelspace.add_circle(
+                        circle = self.current_write_target.add_circle(
                             center=center,
                             radius=radius,
                             dxfattribs=dxfattribs,
@@ -630,7 +742,7 @@ class RendererDxf(RendererBase):
                             else 1.0
                         )
                         if rgbFace is not None and face_alpha > 0:
-                            hatch = self.modelspace.add_hatch(
+                            hatch = self.current_write_target.add_hatch(
                                 color=256, dxfattribs=dxfattribs
                             )
                             hatch.set_solid_fill()
@@ -647,7 +759,7 @@ class RendererDxf(RendererBase):
     def draw_text(self, gc, x, y, s, prop, angle, ismath=False, mtext=None):
         """Draw text with proper layer assignment."""
         draw_text_entity(
-            self.modelspace,
+            self.current_write_target,
             gc,
             s,
             prop,
@@ -710,9 +822,10 @@ class FigureCanvasDxf(FigureCanvasBase):
 
     DXFVERSION = "AC1032"
 
-    def __init__(self, figure, use_fm_layers=False):
+    def __init__(self, figure, use_fm_layers=False, use_subplot_blocks=False):
         super().__init__(figure)
         self.use_fm_layers = use_fm_layers
+        self.use_subplot_blocks = use_subplot_blocks
         self._lastKey = None
 
     def get_dxf_renderer(self, cleared=False):
@@ -734,6 +847,7 @@ class FigureCanvasDxf(FigureCanvasBase):
                 self.figure.dpi,
                 self.DXFVERSION,
                 self.use_fm_layers,
+                use_subplot_blocks=self.use_subplot_blocks,
             )
             self._lastKey = key
         elif cleared:
@@ -745,6 +859,8 @@ class FigureCanvasDxf(FigureCanvasBase):
         Draw the figure using the renderer
         """
         renderer = self.get_dxf_renderer()
+        renderer.figure = self.figure
+        renderer.init_main_plot_block()
         self.figure.draw(renderer)
 
         # After drawing, extract any geo pattern artists that weren't drawn
@@ -756,6 +872,7 @@ class FigureCanvasDxf(FigureCanvasBase):
     def _draw_geo_pattern_artists(self, renderer):
         """Extract and draw geo pattern artists(circles, dots) for FM plots from axes"""
         for ax in self.figure.axes:
+            layout = renderer.block_for_axes(ax)
             if not hasattr(ax, "_geo_pattern_artists"):
                 continue
 
@@ -797,7 +914,7 @@ class FigureCanvasDxf(FigureCanvasBase):
 
                         for x, y in transformed_offsets:
                             if is_valid_coordinate([x, y]):
-                                renderer.modelspace.add_circle(
+                                layout.add_circle(
                                     center=(float(x), float(y)),
                                     radius=radius,
                                     dxfattribs=dxfattribs,
@@ -830,7 +947,7 @@ class FigureCanvasDxf(FigureCanvasBase):
 
                                 for x, y in transformed_offsets:
                                     if is_valid_coordinate([x, y]):
-                                        renderer.modelspace.add_circle(
+                                        layout.add_circle(
                                             center=(float(x), float(y)),
                                             radius=radius,
                                             dxfattribs=dxfattribs,
@@ -858,7 +975,34 @@ class FigureCanvasDxfFM(FigureCanvasDxf):
     """FM-specific DXF canvas with predefined layers"""
 
     def __init__(self, figure):
-        super().__init__(figure, use_fm_layers=True)
+        super().__init__(figure, use_fm_layers=True, use_subplot_blocks=False)
+
+
+def make_figure_canvas(*, use_fm_layers=False, use_subplot_blocks=False):
+    """
+    Create a FigureCanvas class with fixed options.
+
+    Matplotlib's ``register_backend()`` expects a FigureCanvas *class* and does
+    not provide a way to pass extra kwargs at registration time, so upstream
+    libraries can use this factory to configure mpldxf behavior.
+    """
+
+    class _FigureCanvasDxfConfigured(FigureCanvasDxf):
+        def __init__(self, figure):
+            super().__init__(
+                figure,
+                use_fm_layers=use_fm_layers,
+                use_subplot_blocks=use_subplot_blocks,
+            )
+
+    suffix = "FM" if use_fm_layers else "Default"
+    sub = (
+        "SubBlocksDefault"
+        if use_subplot_blocks is None
+        else ("SubBlocksOn" if use_subplot_blocks else "SubBlocksOff")
+    )
+    _FigureCanvasDxfConfigured.__name__ = f"FigureCanvasDxf{suffix}{sub}"
+    return _FigureCanvasDxfConfigured
 
 
 FigureManagerDXF = FigureManagerBase
