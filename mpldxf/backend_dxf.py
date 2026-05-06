@@ -973,10 +973,10 @@ class FigureCanvasDxfFM(FigureCanvasDxf):
     """FM-specific DXF canvas with predefined layers"""
 
     def __init__(self, figure):
-        super().__init__(figure, use_fm_layers=True)
+        super().__init__(figure, use_fm_layers=True, use_subplot_blocks=False)
 
 
-def make_figure_canvas(*, use_fm_layers=False, use_subplot_blocks=None):
+def make_figure_canvas(*, use_fm_layers=False, use_subplot_blocks=False):
     """
     Create a FigureCanvas class with fixed options.
 
