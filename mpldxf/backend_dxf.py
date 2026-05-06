@@ -157,7 +157,6 @@ class RendererDxf(RendererBase):
         When the group closes, ``close_group("axes")`` restores the previous
         destination by popping the stack.
         """
-        """Redirect drawing into a subplot block for the next Axes, if available."""
         ax = self._get_next_axes_for_group()
         if ax is None:
             return
