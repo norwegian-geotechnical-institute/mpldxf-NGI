@@ -15,20 +15,29 @@ DXF drawing code can delegate the FM-specific decisions to one place.
 import re
 
 
-FM_LAYER_STYLES = {
-    "FM-Frame": {"color": 3, "linetype": "CONTINUOUS"},  # Green
-    "FM-Graph": {"color": 4, "linetype": "CONTINUOUS"},  # Cyan
-    "FM-Location": {"color": 6, "linetype": "CONTINUOUS"},  # Magenta
-    "FM-Method": {"color": 5, "linetype": "CONTINUOUS"},  # Blue
-    "FM-Depth": {"color": 1, "linetype": "CONTINUOUS"},  # Red
-    "FM-Value": {"color": 8, "linetype": "CONTINUOUS"},  # Grey
-    "FM-Text": {"color": 2, "linetype": "CONTINUOUS"},  # Yellow
-    "FM-Grid-Vertical": {"color": 7, "linetype": "DASHED2"},  # Grid
-    "FM-Grid-Horizontal": {"color": 7, "linetype": "DASHED2"},  # Grid
+FM_LAYERS = {
+    "FM-Frame": 3,  # Green - frames, ticks, gridlines
+    "FM-Graph": 4,  # Cyan - data graphs/lines
+    "FM-Location": 6,  # Magenta - location name text
+    "FM-Method": 5,  # Blue - method icons and names
+    "FM-Depth": 1,  # Red - Y-axis values (depth/elevation)
+    "FM-Value": 8,  # Grey - X-axis values
+    "FM-Text": 2,  # Yellow - axis labels and other text
+    "FM-Grid-Vertical": 7,  # Light Blue - vertical grid lines
+    "FM-Grid-Horizontal": 7,  # Light Blue - horizontal grid lines
 }
 
-# Backwards compatible alias used by older callers/tests.
-FM_LAYERS = {name: style["color"] for name, style in FM_LAYER_STYLES.items()}
+FM_LAYER_STYLES = {
+    "FM-Frame": {"color": FM_LAYERS["FM-Frame"], "linetype": "CONTINUOUS"},
+    "FM-Graph": {"color": FM_LAYERS["FM-Graph"], "linetype": "CONTINUOUS"},
+    "FM-Location": {"color": FM_LAYERS["FM-Location"], "linetype": "CONTINUOUS"},
+    "FM-Method": {"color": FM_LAYERS["FM-Method"], "linetype": "CONTINUOUS"},
+    "FM-Depth": {"color": FM_LAYERS["FM-Depth"], "linetype": "CONTINUOUS"},
+    "FM-Value": {"color": FM_LAYERS["FM-Value"], "linetype": "CONTINUOUS"},
+    "FM-Text": {"color": FM_LAYERS["FM-Text"], "linetype": "CONTINUOUS"},
+    "FM-Grid-Vertical": {"color": FM_LAYERS["FM-Grid-Vertical"], "linetype": "DASHED2"},
+    "FM-Grid-Horizontal": {"color": FM_LAYERS["FM-Grid-Horizontal"], "linetype": "DASHED2"},
+}
 
 
 def create_fm_layers(drawing):
