@@ -1,5 +1,12 @@
 # Changes
 
+## Version 1.0.8
+
+_2026-05-12_
+
+Add:
+- Linetype attributes for FM_Layers 
+
 ## Version 1.0.7
 
 _2026-05-06_
