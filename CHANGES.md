@@ -2,6 +2,14 @@
 
 ## Version 1.0.8
 
+_2026-05-13_
+
+Add:
+
+- FM_Borehole layer
+
+## Version 1.0.8
+
 _2026-05-12_
 
 Add:
