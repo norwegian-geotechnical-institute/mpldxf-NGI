@@ -76,6 +76,10 @@ class RendererDxf(RendererBase):
 
         if self.use_fm_layers:
             create_fm_layers(drawing)
+            # Make layer-defined linetypes (e.g. DASHED grid layers) visible at the
+            # typical "pixels as drawing units" scale used by this backend.
+            drawing.header["$LTSCALE"] = 0.2
+            drawing.header["$PSLTSCALE"] = 1
 
         self.drawing = drawing
         self.modelspace = modelspace
@@ -257,21 +261,20 @@ class RendererDxf(RendererBase):
             layer_name = self._determine_element_layer()
             attribs["layer"] = layer_name
             attribs["color"] = 256  # ByLayer color
-        else:
-            attribs["color"] = rgb_to_dxf(gc.get_rgb())
+            attribs["linetype"] = "BYLAYER"
 
-        # Handle line style - use DASHED2 for dashed lines with ltscale=0.2
+            return attribs
+        
+        attribs["color"] = rgb_to_dxf(gc.get_rgb())
         dashes = gc.get_dashes()
-        if dashes is not None:
-            offset, dash_list = dashes
-            if dash_list is not None and len(dash_list) > 0:
-                # Use DASHED2 for non-continuous lines
-                attribs["linetype"] = "DASHED2"
-                attribs["ltscale"] = 0.2  # Small scale for finer dash pattern
-            else:
-                attribs["linetype"] = "CONTINUOUS"
-        else:
-            attribs["linetype"] = "CONTINUOUS"
+        if dashes is None:
+            return attribs
+
+        _, dash_list = dashes
+        if dash_list:
+            # Use DASHED2 for non-continuous lines
+            attribs["linetype"] = "DASHED2"
+            attribs["ltscale"] = 0.2  # Small scale for finer dash pattern
 
         return attribs
 
@@ -467,6 +470,7 @@ class RendererDxf(RendererBase):
                             if self.use_fm_layers:
                                 attrs["layer"] = layer_name
                                 attrs["color"] = 256
+                                attrs["linetype"] = "BYLAYER"
                             self.current_write_target.add_lwpolyline(
                                 points=clipped, dxfattribs=attrs
                             )
@@ -606,6 +610,7 @@ class RendererDxf(RendererBase):
         if self.use_fm_layers:
             dxfattribs["layer"] = layer_name
             dxfattribs["color"] = 256
+            dxfattribs["linetype"] = "BYLAYER"
         else:
             dxfattribs["color"] = rgb_to_dxf(gc.get_rgb())
 
@@ -889,6 +894,7 @@ class FigureCanvasDxf(FigureCanvasBase):
                 if self.use_fm_layers:
                     dxfattribs["layer"] = "FM-Graph"
                     dxfattribs["color"] = 256  # ByLayer
+                    dxfattribs["linetype"] = "BYLAYER"
                 else:
                     dxfattribs["color"] = 7  # White/default
 

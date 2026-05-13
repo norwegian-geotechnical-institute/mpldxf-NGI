@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from mpldxf import backend_dxf
+from mpldxf import backend_dxf, fm_layers
 from conftest import (
     block_names,
     entities_by_type,
@@ -127,6 +127,70 @@ def test_dashed_line_exports_dxf_dash_attributes(export_dxf):
 
     assert polyline.dxf.linetype == "DASHED2"
     assert polyline.dxf.ltscale == 0.2
+
+
+def test_fm_canvas_polylines_use_bylayer_linetype(export_dxf):
+    fig, ax = plt.subplots()
+    ax.patch.set_visible(False)
+    ax.plot([0, 1, 2], [0, 1, 0], linestyle="--")
+    ax.axis("off")
+
+    doc = export_dxf(
+        fig,
+        "fm_dashed_line_bylayer_linetype",
+        canvas_cls=backend_dxf.FigureCanvasDxfFM,
+        transparent=True,
+    )
+    polyline = entities_by_type(doc, "LWPOLYLINE")[0]
+
+    assert polyline.dxf.linetype == "BYLAYER"
+
+
+def test_fm_layer_table_defines_linetypes(export_dxf):
+    fig, ax = plt.subplots()
+    ax.plot([0, 1, 2], [0, 1, 0])
+
+    doc = export_dxf(
+        fig,
+        "fm_layer_table_linetypes",
+        canvas_cls=backend_dxf.FigureCanvasDxfFM,
+        transparent=True,
+        save_preview=False,
+    )
+
+    for layer_name, style in fm_layers.FM_LAYER_STYLES.items():
+        assert doc.layers.get(layer_name).dxf.linetype == style["linetype"]
+
+
+def test_fm_canvas_creates_fm_layers_in_layer_table(export_dxf):
+    fig, ax = plt.subplots()
+    ax.plot([0, 1, 2], [0, 1, 0])
+
+    doc = export_dxf(
+        fig,
+        "fm_layer_table_includes_fm_layers",
+        canvas_cls=backend_dxf.FigureCanvasDxfFM,
+        transparent=True,
+        save_preview=False,
+    )
+
+    assert set(fm_layers.FM_LAYER_STYLES) <= layer_names(doc)
+
+
+def test_fm_canvas_sets_linetype_scale_for_layer_linetypes(export_dxf):
+    fig, ax = plt.subplots()
+    ax.grid(True)
+
+    doc = export_dxf(
+        fig,
+        "fm_header_ltscale",
+        canvas_cls=backend_dxf.FigureCanvasDxfFM,
+        transparent=True,
+        save_preview=False,
+    )
+
+    assert float(doc.header.get("$LTSCALE", 1.0)) == 0.2
+    assert int(doc.header.get("$PSLTSCALE", 1)) == 1
 
 
 def test_unfilled_marker_plot_exports_outline_without_hatch(export_dxf):
@@ -324,6 +388,77 @@ def test_fm_gridlines_currently_export_on_graph_layer(export_dxf):
     layers = [entity.dxf.layer for entity in entities_by_type(doc, "LWPOLYLINE")]
 
     assert "FM-Graph" in layers
+
+
+def test_fm_gridlines_gid_override_routes_to_grid_layers(export_dxf):
+    fig, ax = plt.subplots()
+    ax.plot([0, 1, 2], [0, 1, 0])
+    ax.grid(True)
+
+    # Gridlines are Line2D artists; setting a gid triggers the FM layer override.
+    for gridline in ax.get_xgridlines():
+        gridline.set_gid("FM-Grid-Vertical")
+    for gridline in ax.get_ygridlines():
+        gridline.set_gid("FM-Grid-Horizontal")
+
+    doc = export_dxf(
+        fig,
+        "fm_gridlines_gid_override_layering",
+        canvas_cls=backend_dxf.FigureCanvasDxfFM,
+        transparent=True,
+    )
+
+    polylines = entities_by_type(doc, "LWPOLYLINE")
+    layers = {entity.dxf.layer for entity in polylines}
+    assert "FM-Grid-Horizontal" in layers
+    assert "FM-Grid-Vertical" in layers
+
+    grid_polylines = [
+        entity
+        for entity in polylines
+        if entity.dxf.layer in {"FM-Grid-Horizontal", "FM-Grid-Vertical"}
+    ]
+    assert grid_polylines, "Expected at least one gridline polyline on FM-Grid layers"
+    assert {entity.dxf.color for entity in grid_polylines} == {256}
+    # Guard against explicit color overrides (e.g. truecolor) that can confuse CAD viewers.
+    for entity in grid_polylines:
+        attribs = entity.dxfattribs()
+        assert "true_color" not in attribs
+
+    # LibreCAD (and other viewers) will display ByLayer entities using the layer table color.
+    # These FM grid layers currently have ACI color 7, so gridlines can appear "explicitly"
+    # colored even when the entity is correctly set to ByLayer (256).
+    assert doc.layers.get("FM-Grid-Vertical").dxf.color == 7
+    assert doc.layers.get("FM-Grid-Horizontal").dxf.color == 7
+
+
+def test_fm_gridlines_gid_override_get_bylayer_linetype(export_dxf):
+    fig, ax = plt.subplots()
+    ax.grid(True)
+
+    for gridline in ax.get_xgridlines():
+        gridline.set_gid("FM-Grid-Vertical")
+    for gridline in ax.get_ygridlines():
+        gridline.set_gid("FM-Grid-Horizontal")
+
+    doc = export_dxf(
+        fig,
+        "fm_gridlines_gid_override_linetype",
+        canvas_cls=backend_dxf.FigureCanvasDxfFM,
+        transparent=True,
+        save_preview=False,
+    )
+
+    grid_polylines = [
+        entity
+        for entity in entities_by_type(doc, "LWPOLYLINE")
+        if entity.dxf.layer in {"FM-Grid-Horizontal", "FM-Grid-Vertical"}
+    ]
+    assert grid_polylines
+    assert {entity.dxf.linetype for entity in grid_polylines} == {"BYLAYER"}
+    assert doc.layers.get("FM-Grid-Vertical").dxf.linetype == "DASHED2"
+    assert doc.layers.get("FM-Grid-Horizontal").dxf.linetype == "DASHED2"
+    assert float(doc.header.get("$LTSCALE", 1.0)) == 0.2
 
 
 @pytest.mark.xfail(
