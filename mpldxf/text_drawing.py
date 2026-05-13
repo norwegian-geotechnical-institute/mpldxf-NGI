@@ -25,18 +25,18 @@ def _map_align(align, vert=False):
 def draw_text_entity(
     modelspace,
     gc,
+    x,
+    y,
     s,
     prop,
     angle,
+    ismath,
     mtext,
     points_to_pixels,
     use_fm_layers,
     determine_text_layer,
 ):
     """Draw a DXF text entity from a Matplotlib text request."""
-    if mtext is None:
-        return
-
     fontsize = points_to_pixels(prop.get_size_in_points()) / 2
 
     dxfattribs = {}
@@ -69,15 +69,23 @@ def draw_text_entity(
             dxfattribs=dxfattribs,
         )
 
-    if angle == 90.0:
-        if mtext._rotation_mode == "anchor":
-            halign = _map_align(mtext.get_ha(), vert=False)
+    # Matplotlib passes (x, y) in display coordinates; treat that as the
+    # anchor point and map Matplotlib's alignment to ezdxf's alignment enum.
+    if mtext is not None:
+        if angle == 90.0:
+            if getattr(mtext, "_rotation_mode", None) == "anchor":
+                halign = _map_align(mtext.get_ha(), vert=False)
+            else:
+                halign = "RIGHT"
+            valign = _map_align(mtext.get_va(), vert=True)
         else:
-            halign = "RIGHT"
-        valign = _map_align(mtext.get_va(), vert=True)
+            halign = _map_align(mtext.get_ha(), vert=False)
+            valign = _map_align(mtext.get_va(), vert=True)
     else:
-        halign = _map_align(mtext.get_ha(), vert=False)
-        valign = _map_align(mtext.get_va(), vert=True)
+        # For multi-line texts Matplotlib may pass mtext=None; fall back to the
+        # default Text alignment (left/baseline).
+        halign = "LEFT"
+        valign = ""
 
     if valign and valign != "":
         align = valign + "_" + halign
@@ -104,7 +112,6 @@ def draw_text_entity(
 
     align = alignment_map.get(align, TextEntityAlignment.BOTTOM_LEFT)
 
-    pos = mtext.get_unitless_position()
-    x, y = mtext.get_transform().transform(pos)
-    p1 = x, y
+    p1 = float(x), float(y)
     text.set_placement(p1, align=align)
+    return p1
