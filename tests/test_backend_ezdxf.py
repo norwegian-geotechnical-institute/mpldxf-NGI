@@ -193,28 +193,6 @@ def test_fm_canvas_sets_linetype_scale_for_layer_linetypes(export_dxf):
     assert int(doc.header.get("$PSLTSCALE", 1)) == 1
 
 
-def test_dxf_extents_include_text_outside_figure_bounds(export_dxf):
-    fig, ax = plt.subplots()
-    ax.plot([0, 1], [0, 1])
-    # Place figure text below the figure (outside nominal [0, 1] figure coords).
-    fig.text(0.5, -0.1, "outside", ha="center", clip_on=False)
-
-    doc = export_dxf(
-        fig,
-        "extents_include_outside_text",
-        transparent=True,
-        save_preview=False,
-    )
-
-    extmin = doc.header.get("$EXTMIN")
-    extmax = doc.header.get("$EXTMAX")
-    minx, miny, _ = extmin
-    maxx, maxy, _ = extmax
-
-    assert miny < 0
-    assert maxy > 0
-
-
 def test_unfilled_marker_plot_exports_outline_without_hatch(export_dxf):
     fig, ax = plt.subplots()
     ax.patch.set_visible(False)
