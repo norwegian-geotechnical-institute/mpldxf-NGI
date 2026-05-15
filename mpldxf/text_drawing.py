@@ -32,11 +32,10 @@ def draw_text_entity(
     points_to_pixels,
     use_fm_layers,
     determine_text_layer,
+    x=None,
+    y=None,
 ):
     """Draw a DXF text entity from a Matplotlib text request."""
-    if mtext is None:
-        return
-
     fontsize = points_to_pixels(prop.get_size_in_points()) / 2
 
     dxfattribs = {}
@@ -49,25 +48,41 @@ def draw_text_entity(
 
     s = s.replace("\u2212", "-")
     s = s.encode("ascii", "ignore").decode()
+    if not s:
+        return
 
     if s and len(s) > 0 and s[0] == "$":
         pattern = r"\\mathbf\{(.*?)\}"
-        stripped_text = re.sub(pattern, r"\1", s)
-        stripped_text = re.sub(r"[$]", "", stripped_text)
-        stripped_text = re.sub(r"\\/", " ", stripped_text)
-        text = modelspace.add_text(
-            stripped_text,
-            height=fontsize,
-            rotation=angle,
-            dxfattribs=dxfattribs,
-        )
+        text_content = re.sub(pattern, r"\1", s)
+        text_content = re.sub(r"[$]", "", text_content)
+        text_content = re.sub(r"\\/", " ", text_content)
     else:
+        text_content = s
+
+    if not text_content:
+        return
+
+    # Matplotlib does not guarantee that it passes the underlying Text artist
+    # object (``mtext``). When it is missing, fall back to the explicit x/y
+    # coordinates from the renderer call.
+    if mtext is None:
+        if x is None or y is None:
+            return
         text = modelspace.add_text(
-            s,
+            text_content,
             height=fontsize,
             rotation=angle,
             dxfattribs=dxfattribs,
         )
+        text.set_placement((float(x), float(y)), align=TextEntityAlignment.LEFT)
+        return
+
+    text = modelspace.add_text(
+        text_content,
+        height=fontsize,
+        rotation=angle,
+        dxfattribs=dxfattribs,
+    )
 
     if angle == 90.0:
         if mtext._rotation_mode == "anchor":
