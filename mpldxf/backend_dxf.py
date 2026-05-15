@@ -31,6 +31,7 @@ from shapely.geometry import LineString, Polygon
 import ezdxf
 from ezdxf.math.clipping import ClippingRect2d
 
+from mpldxf.extents import Extents2D, apply_extents_to_drawing
 from mpldxf.text_drawing import draw_text_entity
 from .color_utils import rgb_to_dxf
 from .fm_layers import (
@@ -88,69 +89,23 @@ class RendererDxf(RendererBase):
         self._next_axes_index = 0
         self._axes_block_names = {}
         self._axes_block_refs = set()
-        self._reset_tracked_extents()
+        self._extents = Extents2D.from_size(width=self.width, height=self.height)
 
-    def _reset_tracked_extents(self):
-        # Track content extents for better initial view/zoom behavior in CAD apps.
-        # Initialize to the nominal figure bounds.
-        self._extents_min = [0.0, 0.0]
-        self._extents_max = [float(self.width), float(self.height)]
+    def track_point(self, x, y):
+        self._extents.track_point(x, y)
 
-    def _track_point(self, x, y):
-        if not is_valid_coordinate([x, y]):
-            return
-        xf = float(x)
-        yf = float(y)
-        self._extents_min[0] = min(self._extents_min[0], xf)
-        self._extents_min[1] = min(self._extents_min[1], yf)
-        self._extents_max[0] = max(self._extents_max[0], xf)
-        self._extents_max[1] = max(self._extents_max[1], yf)
-
-    def _track_points(self, points):
-        for x, y in points:
-            self._track_point(x, y)
+    def track_points(self, points):
+        self._extents.track_points(points)
 
     def track_circle(self, center, radius):
-        try:
-            cx, cy = center
-            r = float(radius)
-        except Exception:
-            return
-        if r < 0:
-            r = -r
-        self._track_point(cx - r, cy - r)
-        self._track_point(cx + r, cy + r)
+        self._extents.track_circle(center, radius)
 
     def finalize_drawing(self):
-        # Update stored extents for better "zoom extents"/initial view behavior.
-        minx, miny = self._extents_min
-        maxx, maxy = self._extents_max
-        self.drawing.header["$EXTMIN"] = (float(minx), float(miny), 0.0)
-        self.drawing.header["$EXTMAX"] = (float(maxx), float(maxy), 0.0)
-        try:
-            self.modelspace.dxf.extmin = (float(minx), float(miny), 0.0)
-            self.modelspace.dxf.extmax = (float(maxx), float(maxy), 0.0)
-        except Exception:
-            pass
-
-        # Hint an initial modelspace view centered on the content.
-        try:
-            width = float(maxx - minx)
-            height = float(maxy - miny)
-            if height <= 0:
-                height = 1.0
-            center = (float(minx + width / 2.0), float(miny + height / 2.0))
-            vport = self.drawing.set_modelspace_vport(
-                height=height * 1.05,
-                center=center,
-            )
-            if width > 0:
-                try:
-                    vport.dxf.aspect_ratio = width / height
-                except Exception:
-                    pass
-        except Exception:
-            pass
+        apply_extents_to_drawing(
+            drawing=self.drawing,
+            modelspace=self.modelspace,
+            extents=self._extents,
+        )
 
     def init_main_plot_block(self):
         if not self.use_subplot_blocks:
@@ -404,7 +359,7 @@ class RendererDxf(RendererBase):
                     # Validate coordinates before adding to DXF
                     vertices = filter_invalid_coordinates(vertices)
                     if len(vertices) > 0 and vertices[0][0] != 0:
-                        self._track_points(vertices)
+                        self.track_points(vertices)
                         entity = self.current_write_target.add_lwpolyline(
                             points=vertices, close=False, dxfattribs=dxfattribs
                         )
@@ -417,7 +372,7 @@ class RendererDxf(RendererBase):
                     ]
                     vertices = [v for v in vertices if len(v) > 0]
                     for points in vertices:
-                        self._track_points(points)
+                        self.track_points(points)
                     entity = [
                         self.current_write_target.add_lwpolyline(
                             points=points, close=False, dxfattribs=dxfattribs
@@ -531,7 +486,7 @@ class RendererDxf(RendererBase):
                         clipped = filter_invalid_coordinates(clipped)
 
                     if len(clipped) > 0:
-                        self._track_points(clipped)
+                        self.track_points(clipped)
                         if len(vertices) == 2:
                             attrs = {"color": dxfcolor}
                             if self.use_fm_layers:
@@ -761,7 +716,7 @@ class RendererDxf(RendererBase):
                         elif dist < 0.5:  # For simple shapes, use fixed threshold
                             should_close = True
 
-                    self._track_points(positioned_segment)
+                    self.track_points(positioned_segment)
                     polyline = self.current_write_target.add_lwpolyline(
                         points=positioned_segment,
                         close=should_close,
@@ -847,7 +802,7 @@ class RendererDxf(RendererBase):
             self._determine_text_layer,
         )
         if p1 is not None:
-            self._track_point(p1[0], p1[1])
+            self.track_point(p1[0], p1[1])
 
     def flipy(self):
         return False
