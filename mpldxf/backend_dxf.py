@@ -31,7 +31,6 @@ from shapely.geometry import LineString, Polygon
 import ezdxf
 from ezdxf.math.clipping import ClippingRect2d
 
-from mpldxf.extents import Extents2D, apply_extents_to_drawing
 from mpldxf.text_drawing import draw_text_entity
 from .color_utils import rgb_to_dxf
 from .fm_layers import (
@@ -89,23 +88,6 @@ class RendererDxf(RendererBase):
         self._next_axes_index = 0
         self._axes_block_names = {}
         self._axes_block_refs = set()
-        self._extents = Extents2D.from_size(width=self.width, height=self.height)
-
-    def track_point(self, x, y):
-        self._extents.track_point(x, y)
-
-    def track_points(self, points):
-        self._extents.track_points(points)
-
-    def track_circle(self, center, radius):
-        self._extents.track_circle(center, radius)
-
-    def finalize_drawing(self):
-        apply_extents_to_drawing(
-            drawing=self.drawing,
-            modelspace=self.modelspace,
-            extents=self._extents,
-        )
 
     def init_main_plot_block(self):
         if not self.use_subplot_blocks:
@@ -359,7 +341,6 @@ class RendererDxf(RendererBase):
                     # Validate coordinates before adding to DXF
                     vertices = filter_invalid_coordinates(vertices)
                     if len(vertices) > 0 and vertices[0][0] != 0:
-                        self.track_points(vertices)
                         entity = self.current_write_target.add_lwpolyline(
                             points=vertices, close=False, dxfattribs=dxfattribs
                         )
@@ -371,8 +352,6 @@ class RendererDxf(RendererBase):
                         filter_invalid_coordinates(points) for points in vertices
                     ]
                     vertices = [v for v in vertices if len(v) > 0]
-                    for points in vertices:
-                        self.track_points(points)
                     entity = [
                         self.current_write_target.add_lwpolyline(
                             points=points, close=False, dxfattribs=dxfattribs
@@ -486,7 +465,6 @@ class RendererDxf(RendererBase):
                         clipped = filter_invalid_coordinates(clipped)
 
                     if len(clipped) > 0:
-                        self.track_points(clipped)
                         if len(vertices) == 2:
                             attrs = {"color": dxfcolor}
                             if self.use_fm_layers:
@@ -716,7 +694,6 @@ class RendererDxf(RendererBase):
                         elif dist < 0.5:  # For simple shapes, use fixed threshold
                             should_close = True
 
-                    self.track_points(positioned_segment)
                     polyline = self.current_write_target.add_lwpolyline(
                         points=positioned_segment,
                         close=should_close,
@@ -757,7 +734,6 @@ class RendererDxf(RendererBase):
                     # This ensures the circle is centered correctly on the data point
                     center = [dx, dy]
                     if is_valid_coordinate(center):
-                        self.track_circle(center, radius)
                         circle = self.current_write_target.add_circle(
                             center=center,
                             radius=radius,
@@ -787,22 +763,17 @@ class RendererDxf(RendererBase):
 
     def draw_text(self, gc, x, y, s, prop, angle, ismath=False, mtext=None):
         """Draw text with proper layer assignment."""
-        p1 = draw_text_entity(
+        draw_text_entity(
             self.current_write_target,
             gc,
-            x,
-            y,
             s,
             prop,
             angle,
-            ismath,
             mtext,
             self.points_to_pixels,
             self.use_fm_layers,
             self._determine_text_layer,
         )
-        if p1 is not None:
-            self.track_point(p1[0], p1[1])
 
     def flipy(self):
         return False
@@ -901,7 +872,6 @@ class FigureCanvasDxf(FigureCanvasBase):
         # These are custom pattern artists stored in axes._geo_pattern_artists
         self._draw_geo_pattern_artists(renderer)
 
-        renderer.finalize_drawing()
         return renderer.drawing
 
     def _draw_geo_pattern_artists(self, renderer):
@@ -950,7 +920,6 @@ class FigureCanvasDxf(FigureCanvasBase):
 
                         for x, y in transformed_offsets:
                             if is_valid_coordinate([x, y]):
-                                renderer.track_circle((float(x), float(y)), radius)
                                 layout.add_circle(
                                     center=(float(x), float(y)),
                                     radius=radius,
@@ -984,7 +953,6 @@ class FigureCanvasDxf(FigureCanvasBase):
 
                                 for x, y in transformed_offsets:
                                     if is_valid_coordinate([x, y]):
-                                        renderer.track_circle((float(x), float(y)), radius)
                                         layout.add_circle(
                                             center=(float(x), float(y)),
                                             radius=radius,
