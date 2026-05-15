@@ -1,5 +1,12 @@
 # Changes
 
+## Version 1.0.9
+
+_2026-05-15_
+
+Fix:
+- write text even if mtext is None
+
 ## Version 1.0.8
 
 _2026-05-12_
