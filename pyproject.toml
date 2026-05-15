@@ -1,6 +1,6 @@
 [project]
 name = "mpldxf"
-version = "1.0.9"
+version = "1.0.10"
 description = "A fork of mpldxf - a matplotlib backend to write DXF drawings. Modified by NGI to handle geotechnical plots"
 authors = [
     { name = "David Kent" },

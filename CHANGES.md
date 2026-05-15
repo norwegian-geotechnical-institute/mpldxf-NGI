@@ -1,6 +1,6 @@
 # Changes
 
-## Version 1.0.9
+## Version 1.0.10
 
 _2026-05-15_
 
