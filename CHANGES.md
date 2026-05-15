@@ -4,8 +4,8 @@
 
 _2026-05-15_
 
-Add:
-- Extent tracking
+Fix:
+- write text even if mtext is None
 
 ## Version 1.0.8
 
