@@ -25,6 +25,7 @@ FM_LAYER_STYLES = {
     "FM-Text": {"color": 2, "linetype": "CONTINUOUS"},    # Yellow - axis labels and other text
     "FM-Grid-Vertical": {"color": 7, "linetype": "DASHED2"}, # Light Blue - vertical grid lines
     "FM-Grid-Horizontal": {"color": 7, "linetype": "DASHED2"},  # Light Blue - horizontal grid lines
+    "FM-Borehole": {"color": 3, "linetype": "CONTINUOUS"},  # Green - swedish borehole frame 
 }
 
 # Backwards compatible alias used by older callers/tests.
@@ -50,6 +51,8 @@ def determine_element_layer(group_stack, group_gids):
             return "FM-Grid-Horizontal"
         if group_gids.get(group_name) == "FM-Frame":
             return "FM-Frame"
+        if group_gids.get(group_name) == "FM-Borehole":
+            return "FM-Borehole"
 
     if not group_stack:
         return "0"
