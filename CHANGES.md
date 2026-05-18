@@ -1,12 +1,19 @@
 # Changes
 
-## Version 1.0.9
+## Version 1.0.11
 
-_2026-05-13_
+_2026-05-18_
 
 Add:
 
 - FM_Borehole layer
+  
+## Version 1.0.10
+
+_2026-05-15_
+
+Fix:
+- write text even if mtext is None
 
 ## Version 1.0.8
 

@@ -773,6 +773,8 @@ class RendererDxf(RendererBase):
             self.points_to_pixels,
             self.use_fm_layers,
             self._determine_text_layer,
+            x=x,
+            y=y,
         )
 
     def flipy(self):
